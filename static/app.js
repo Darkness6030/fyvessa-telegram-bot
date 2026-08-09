@@ -55,8 +55,47 @@ function errorMessage(payload) {
     return 'Не удалось выполнить действие';
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {...options, signal: controller.signal});
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('Сервер не ответил вовремя. Закройте Mini App и откройте его снова');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function showFragmentLoading(container) {
+    container.innerHTML = `
+        <div class="animate-pulse space-y-3" aria-label="Загрузка">
+            <div class="h-24 rounded-[1.5rem] bg-white/70"></div>
+            <div class="h-24 rounded-[1.5rem] bg-white/50"></div>
+        </div>`;
+}
+
+function showFragmentError(container, error) {
+    container.innerHTML = `
+        <div class="rounded-[2rem] border border-coral/30 bg-white p-8 text-center shadow-soft">
+            <p class="text-3xl">!</p>
+            <h2 class="mt-3 text-xl font-black">Раздел не подключён</h2>
+            <p data-fragment-error class="mt-2 text-black/55"></p>
+            <button type="button" data-fragment-retry class="mt-5 rounded-full bg-ink px-5 py-3 font-bold text-white">Повторить</button>
+        </div>`;
+    container.querySelector('[data-fragment-error]').textContent = error.message;
+    container.querySelector('[data-fragment-retry]').addEventListener(
+        'click',
+        () => loadProtectedFragment(container),
+        {once: true}
+    );
+}
+
 async function api(url, options = {}) {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         ...options,
         headers: {
             'Content-Type': 'application/json',
@@ -72,8 +111,9 @@ async function api(url, options = {}) {
 }
 
 async function loadProtectedFragment(container) {
+    showFragmentLoading(container);
     try {
-        const response = await fetch(container.dataset.authFragment, {
+        const response = await fetchWithTimeout(container.dataset.authFragment, {
             headers: telegramHeaders()
         });
         if (!response.ok) {
@@ -83,7 +123,7 @@ async function loadProtectedFragment(container) {
         container.innerHTML = await response.text();
         if (container.dataset.authFragment === '/api/cart') scheduleCartPolling(container);
     } catch (error) {
-        container.innerHTML = `<div class="rounded-[2rem] border border-dashed border-black/20 p-10 text-center"><p class="text-3xl">↗</p><h2 class="mt-3 text-xl font-black">Нужен Telegram</h2><p class="mt-2 text-black/50">${error.message}</p></div>`;
+        showFragmentError(container, error);
     }
 }
 

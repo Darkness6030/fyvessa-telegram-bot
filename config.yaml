@@ -12,9 +12,7 @@ src:
     products_path: !env "PRODUCTS_PATH:"
   routes:
     products_path: !env "PRODUCTS_PATH:"
-    payment_details: !env "PAYMENT_DETAILS:Реквизиты для оплаты уточните в чате поддержки"
-    reviews_channel_url: !env "REVIEWS_CHANNEL_URL:"
-    channel_url: !env "CHANNEL_URL:"
+    payment_details: !env "PAYMENT_DETAILS:"
 rewire:
   log:
     sinks:

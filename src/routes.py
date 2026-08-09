@@ -5,7 +5,7 @@ from typing import Annotated, Optional
 
 from aiogram import Bot
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -44,8 +44,6 @@ from src.orders import (
 class Config(BaseModel):
     products_path: str = 'assets/products.xlsx'
     payment_details: str = 'Реквизиты для оплаты уточните в чате поддержки'
-    reviews_channel_url: str = ''
-    channel_url: str
 
 
 plugin = simple_plugin()
@@ -350,11 +348,6 @@ async def order_page(request: Request, order_id: int) -> HTMLResponse:
         name='order.html',
         context={'request': request, 'order_id': order_id},
     )
-
-
-@router.get('/reviews', include_in_schema=False)
-async def reviews_page() -> RedirectResponse:
-    return RedirectResponse(Config.reviews_channel_url or Config.channel_url)
 
 
 @router.get('/api/favorites', response_class=HTMLResponse)
@@ -782,9 +775,6 @@ async def report_order_payment(
 
 @plugin.setup()
 def configure_web(app: FastAPI) -> None:
-    templates.env.globals['reviews_channel_url'] = (
-        Config.reviews_channel_url or Config.channel_url
-    )
     app.mount('/static', StaticFiles(directory=Path('static')), name='static')
     app.include_router(router)
 

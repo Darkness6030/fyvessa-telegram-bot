@@ -41,11 +41,11 @@
 <footer class="mx-auto mt-16 max-w-6xl border-t border-black/10 px-4 py-8 text-sm text-black/50">
   <div class="flex items-center justify-between">
     <span>Fyvessa · магазин в Telegram</span>
-    <div class="flex gap-4"><a href="{{ reviews_channel_url }}" target="_blank" rel="noopener" class="font-semibold text-ink">Отзывы</a><a href="/recent" class="font-semibold text-ink">Недавно смотрели</a></div>
+    <a href="/recent" class="font-semibold text-ink">Недавно смотрели</a>
   </div>
 </footer>
 <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 z-50 hidden -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft"></div>
-<script src="{{ url_for('static', path='/app.js') }}?v=20260809-2"></script>
+<script src="{{ url_for('static', path='/app.js') }}?v=20260809-3"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
