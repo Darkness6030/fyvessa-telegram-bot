@@ -21,7 +21,7 @@
         }
     }
   </script>
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="/static/app.css?v=20260809-4">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
@@ -45,7 +45,7 @@
   </div>
 </footer>
 <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 z-50 hidden -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft"></div>
-<script src="{{ url_for('static', path='/app.js') }}?v=20260809-3"></script>
+<script src="/static/app.js?v=20260809-4"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
