@@ -319,6 +319,7 @@ class Promocode(SQLModel, table=True):
             .where(func.upper(cls.code) == code.strip().upper())
             .where(col(cls.is_deleted).is_(False))
         )
+
         if active_only:
             query = query.where(col(cls.is_active).is_(True))
 

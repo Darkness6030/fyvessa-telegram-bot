@@ -654,8 +654,8 @@ async def report_order_payment(order_id: int, user: RequestUser) -> ReportPaymen
     if not order:
         raise HTTPException(status_code=404, detail='Заказ не найден')
 
-    changed = await report_payment(order)
-    if changed:
+    has_changed = await report_payment(order)
+    if has_changed:
         delivered = await notify_payment_review(order, user)
         if not delivered:
             raise HTTPException(
@@ -663,7 +663,7 @@ async def report_order_payment(order_id: int, user: RequestUser) -> ReportPaymen
                 detail='Админский чат временно недоступен. Попробуйте ещё раз позже',
             )
 
-    return ReportPaymentResponse(ok=changed, status=order.status)
+    return ReportPaymentResponse(ok=has_changed, status=order.status)
 
 
 @plugin.setup()

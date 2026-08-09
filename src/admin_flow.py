@@ -44,6 +44,7 @@ router.callback_query.filter(F.message.chat.id == Config.admin_chat_id)
 
 class AdminSectionCallback(CallbackData, prefix='adm'):
     section: str
+    page: int = 0
 
 
 class AvailabilityActionCallback(CallbackData, prefix='av'):
@@ -59,6 +60,7 @@ class OrderActionCallback(CallbackData, prefix='ord'):
 class UserSectionCallback(CallbackData, prefix='usr'):
     user_id: int
     section: str
+    page: int = 0
 
 
 class PromocodeToggleCallback(CallbackData, prefix='promo'):
@@ -112,17 +114,16 @@ def _cart_keyboard():
 def _availability_keyboard(request_id: int):
     buttons = [
         (
-            text,
-            AvailabilityActionCallback(
-                request_id=request_id, status=status,
-            ),
+            button_text,
+            AvailabilityActionCallback(request_id=request_id, status=status),
         )
-        for text, status in (
+        for button_text, status in (
             ('✅ Есть всё', 'available'),
             ('❌ Нет', 'unavailable'),
             ('⏳ Уточняется', 'on_request'),
         )
     ]
+
     buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
     return inline_keyboard(buttons, 2, 1, 1)
 
@@ -196,18 +197,6 @@ def _admin_keyboard():
     ])
 
 
-def _page_section(section: str, page: int = 0) -> str:
-    return f'{section}.{page}' if page else section
-
-
-def _parse_section(value: str) -> tuple[str, int]:
-    section, separator, page = value.rpartition('.')
-    if separator and page.isdigit():
-        return section, int(page)
-
-    return value, 0
-
-
 def _back_keyboard(section: str = 'menu', page: int = 0):
     if section == 'menu':
         return inline_keyboard([
@@ -223,7 +212,7 @@ def _back_keyboard(section: str = 'menu', page: int = 0):
     return inline_keyboard([
         (
             section_labels.get(section, '← К разделу'),
-            AdminSectionCallback(section=_page_section(section, page)),
+            AdminSectionCallback(section=section, page=page),
         ),
         ('⌂ Меню', AdminSectionCallback(section='menu')),
     ])
@@ -238,13 +227,13 @@ def _admin_navigation(section: str, page: int, total: int) -> list[tuple[str, An
     if page > 0:
         buttons.append((
             f'← {page}/{total}',
-            AdminSectionCallback(section=_page_section(section, page - 1)),
+            AdminSectionCallback(section=section, page=page - 1),
         ))
 
     if page + 1 < total:
         buttons.append((
             f'{page + 2}/{total} →',
-            AdminSectionCallback(section=_page_section(section, page + 1)),
+            AdminSectionCallback(section=section, page=page + 1),
         ))
 
     return buttons + [('⌂ Меню', AdminSectionCallback(section='menu'))]
@@ -258,7 +247,7 @@ def _user_navigation(
         buttons.append((
             f'← {page}/{total}',
             UserSectionCallback(
-                user_id=user_id, section=_page_section(section, page - 1),
+                user_id=user_id, section=section, page=page - 1,
             ),
         ))
 
@@ -266,7 +255,7 @@ def _user_navigation(
         buttons.append((
             f'{page + 2}/{total} →',
             UserSectionCallback(
-                user_id=user_id, section=_page_section(section, page + 1),
+                user_id=user_id, section=section, page=page + 1,
             ),
         ))
 
@@ -364,17 +353,13 @@ def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
     if page > 0:
         buttons.append((
             f'← {page}/{total}',
-            AdminSectionCallback(
-                section=_page_section('users', page - 1),
-            ),
+            AdminSectionCallback(section='users', page=page - 1),
         ))
 
     if page + 1 < total:
         buttons.append((
             f'{page + 2}/{total} →',
-            AdminSectionCallback(
-                section=_page_section('users', page + 1),
-            ),
+            AdminSectionCallback(section='users', page=page + 1),
         ))
 
     buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
@@ -653,23 +638,20 @@ async def _resolve_availability(
 
 @router.callback_query(AdminSectionCallback.filter())
 @transaction(1)
-async def admin_section(
-    callback: CallbackQuery, callback_data: AdminSectionCallback,
-    state: FSMContext,
-):
+async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCallback, state: FSMContext):
     await state.clear()
-    section, page = _parse_section(callback_data.section)
-    if section == 'menu':
+    if callback_data.section == 'menu':
         await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
-    elif section == 'sync':
+    elif callback_data.section == 'sync':
         await _edit_message(callback, await _sync_text(), _back_keyboard())
-    elif section == 'help':
+    elif callback_data.section == 'help':
         await _edit_message(callback, _help_text(), _back_keyboard())
-    elif section == 'availability':
+    elif callback_data.section == 'availability':
         requests = await AvailabilityRequest.get_recent(pending_only=True)
         if not requests:
             return await callback.answer('Запросов наличия нет.', show_alert=True)
-        page = min(page, len(requests) - 1)
+
+        page = min(callback_data.page, len(requests) - 1)
         availability = requests[page]
         await _edit_message(
             callback, await _availability_text(availability),
@@ -677,41 +659,48 @@ async def admin_section(
                 availability, page=page, total=len(requests),
             ),
         )
-    elif section == 'orders':
+
+    elif callback_data.section == 'orders':
         orders = await Order.get_recent()
         if not orders:
             return await callback.answer('Заказов пока нет.', show_alert=True)
-        page = min(page, len(orders) - 1)
+
+        page = min(callback_data.page, len(orders) - 1)
         order = orders[page]
         await _edit_message(
             callback, _order_text(order, await User.get_by_id(order.user_id)),
             _order_keyboard(order, page=page, total=len(orders)),
         )
-    elif section == 'users':
+
+    elif callback_data.section == 'users':
         users = await User.get_recent()
         if not users:
             return await callback.answer('Пользователей пока нет.', show_alert=True)
-        page = min(page, len(users) - 1)
+
+        page = min(callback_data.page, len(users) - 1)
         user = users[page]
         await _edit_message(
             callback, await _user_text(user),
             _user_keyboard(user.id, page, len(users)),
         )
-    elif section == 'promos':
-        await _show_promocodes(callback, page)
 
-    elif section == 'summary':
+    elif callback_data.section == 'promos':
+        await _show_promocodes(callback, callback_data.page)
+
+    elif callback_data.section == 'summary':
         products = await Product.get_all()
         users = await User.get_all()
         orders = await Order.get_all()
         pending = await AvailabilityRequest.get_recent(
             pending_only=True, limit=None,
         )
+
         review = [order for order in orders if order.status == 'payment_review']
         paid_total = sum(
             (order.paid_total for order in orders if order.payment_status == 'paid'),
             Decimal('0'),
         )
+
         await _edit_message(
             callback,
             '<b>Текущая сводка</b>\n\n'
@@ -723,8 +712,6 @@ async def admin_section(
             f'Подтверждено оплат: {paid_total} ₽',
             _back_keyboard(),
         )
-    else:
-        return await callback.answer('Раздел не найден.', show_alert=True)
 
 
 @router.callback_query(UserSectionCallback.filter())
@@ -734,13 +721,12 @@ async def user_section(callback: CallbackQuery, callback_data: UserSectionCallba
     if not user:
         return await callback.answer('Пользователь не найден', show_alert=True)
 
-    section, page = _parse_section(callback_data.section)
-    if section == 'orders':
+    if callback_data.section == 'orders':
         orders = await Order.get_recent(user_id=user.id, limit=10)
         if not orders:
             return await callback.answer('У пользователя пока нет заказов.', show_alert=True)
 
-        page = min(page, len(orders) - 1)
+        page = min(callback_data.page, len(orders) - 1)
         order = orders[page]
         await _edit_message(
             callback, _order_text(order, user),
@@ -749,12 +735,12 @@ async def user_section(callback: CallbackQuery, callback_data: UserSectionCallba
             ),
         )
 
-    elif section == 'availability':
+    elif callback_data.section == 'availability':
         requests = await AvailabilityRequest.get_recent(user_id=user.id)
         if not requests:
             return await callback.answer('Запросов наличия нет.', show_alert=True)
 
-        page = min(page, len(requests) - 1)
+        page = min(callback_data.page, len(requests) - 1)
         availability = requests[page]
         await _edit_message(
             callback, await _availability_text(availability),
@@ -773,7 +759,7 @@ async def availability_action(callback: CallbackQuery, callback_data: Availabili
     if not availability:
         return await callback.answer('Запрос не найден', show_alert=True)
 
-    changed = await _resolve_availability(
+    has_changed = await _resolve_availability(
         availability,
         callback_data.status,
         None,
@@ -781,7 +767,7 @@ async def availability_action(callback: CallbackQuery, callback_data: Availabili
         callback.from_user.id
     )
 
-    if not changed:
+    if not has_changed:
         return await callback.answer('Запрос уже обработан', show_alert=True)
 
     await _edit_message(
@@ -806,6 +792,7 @@ async def availability_command(message: Message, command: CommandObject):
 
     quantity = None
     comment = None
+
     if len(parts) >= 3:
         try:
             quantity = int(parts[2])
@@ -820,43 +807,39 @@ async def availability_command(message: Message, command: CommandObject):
         )
 
     try:
-        changed = await _resolve_availability(
+        has_changed = await _resolve_availability(
             availability,
-            AVAILABILITY_COMMAND_STATUSES.get(
-                parts[1].casefold(), parts[1].casefold(),
-            ),
+            AVAILABILITY_COMMAND_STATUSES.get(parts[1].casefold(), parts[1].casefold()),
             quantity,
             comment,
             message.from_user.id
         )
     except ValueError as exc:
-        return await _answer_with_navigation(
-            message, html.escape(str(exc)), 'availability',
-        )
+        return await _answer_with_navigation(message, html.escape(str(exc)), 'availability')
 
     await _answer_with_navigation(
         message,
-        'Ответ отправлен.' if changed else 'Запрос уже обработан.',
+        'Ответ отправлен.' if has_changed else 'Запрос уже обработан.',
         'availability',
     )
 
 
 async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
     if action == 'paid':
-        changed = await confirm_payment(order, admin_id)
-        text = f'✅ Оплата заказа <b>{html.escape(order.number)}</b> подтверждена.'
+        has_changed = await confirm_payment(order, admin_id)
+        message_text = f'✅ Оплата заказа <b>{html.escape(order.number)}</b> подтверждена.'
     elif action == 'cancel':
-        changed = await cancel_order(order, admin_id)
-        text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
+        has_changed = await cancel_order(order, admin_id)
+        message_text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
     else:
         raise ValueError('Действие: оплачен или отмена')
 
-    if changed:
+    if has_changed:
         user = await User.get_by_id(order.user_id)
         if user:
-            await bot.send_message(user.id, text)
+            await bot.send_message(user.id, message_text)
 
-    return changed
+    return has_changed
 
 
 @router.callback_query(OrderActionCallback.filter())
@@ -867,7 +850,7 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
         return await callback.answer('Заказ не найден', show_alert=True)
 
     try:
-        changed = await _apply_order_action(
+        has_changed = await _apply_order_action(
             order,
             callback_data.action,
             callback.from_user.id,
@@ -875,7 +858,7 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
     except ValueError as exc:
         return await callback.answer(str(exc), show_alert=True)
 
-    if not changed:
+    if not has_changed:
         return await callback.answer('Уже выполнено', show_alert=True)
 
     user = await User.get_by_id(order.user_id)
@@ -886,9 +869,7 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
 
     await _edit_message(
         callback, _order_text(order, user),
-        _order_keyboard(
-            order, page=page, total=max(len(orders), 1),
-        ),
+        _order_keyboard(order, page=page, total=max(len(orders), 1)),
     )
 
     await callback.answer('Готово')
@@ -907,15 +888,11 @@ async def order_command(message: Message, command: CommandObject):
 
     order = await Order.get_by_id(int(parts[0]))
     if not order:
-        return await _answer_with_navigation(
-            message, 'Заказ не найден.', 'orders',
-        )
+        return await _answer_with_navigation(message, 'Заказ не найден.', 'orders')
 
     try:
-        action = ORDER_COMMAND_ACTIONS.get(
-            parts[1].casefold(), parts[1].casefold(),
-        )
-        changed = await _apply_order_action(order, action, message.from_user.id)
+        action = ORDER_COMMAND_ACTIONS.get(parts[1].casefold(), parts[1].casefold())
+        has_changed = await _apply_order_action(order, action, message.from_user.id)
     except ValueError as exc:
         return await _answer_with_navigation(
             message, html.escape(str(exc)), 'orders',
@@ -923,7 +900,7 @@ async def order_command(message: Message, command: CommandObject):
 
     await _answer_with_navigation(
         message,
-        'Готово.' if changed else 'Это действие уже выполнено.',
+        'Готово.' if has_changed else 'Это действие уже выполнено.',
         'orders',
     )
 
@@ -1020,19 +997,21 @@ async def promocode_form(message: Message, state: FSMContext):
     try:
         promocode = await _save_promocode(message.text or '')
     except ValueError as exc:
-        text = (
+        error_text = (
             f'❌ {html.escape(str(exc))}.\n\n'
             'Отправьте данные ещё раз одним сообщением:\n'
             '<code>CODE | Имя партнёра | 10 | 10</code>'
         )
+
         if message_id:
             return await _edit_promocode_prompt(
-                message, message_id, text,
+                message, message_id, error_text,
                 _promocode_form_keyboard(promocode_id, page),
             )
 
         return await message.answer(
-            text, reply_markup=_promocode_form_keyboard(promocode_id, page),
+            error_text,
+            reply_markup=_promocode_form_keyboard(promocode_id, page),
         )
 
     await state.clear()
@@ -1041,14 +1020,13 @@ async def promocode_form(message: Message, state: FSMContext):
         (index for index, item in enumerate(promocodes) if item.id == promocode.id),
         0,
     )
-    text = await _promocode_text(promocode)
+
+    message_text = await _promocode_text(promocode)
     reply_markup = _promocode_keyboard(promocode, page, len(promocodes))
     if message_id:
-        return await _edit_promocode_prompt(
-            message, message_id, text, reply_markup,
-        )
+        return await _edit_promocode_prompt(message, message_id, message_text, reply_markup)
 
-    await message.answer(text, reply_markup=reply_markup)
+    await message.answer(message_text, reply_markup=reply_markup)
 
 
 @router.callback_query(PromocodeActionCallback.filter())
