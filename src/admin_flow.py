@@ -124,7 +124,7 @@ def _availability_keyboard(request_id: int):
         )
     ]
 
-    buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
+    buttons.append(('🏠 Меню', AdminSectionCallback(section='menu')))
     return inline_keyboard(buttons, 2, 1, 1)
 
 
@@ -162,7 +162,7 @@ async def notify_payment_review(order: Order, user: User) -> bool:
                 '✖️ Отменить заказ',
                 OrderActionCallback(order_id=order.id, action='cancel'),
             ),
-            ('⌂ Меню', AdminSectionCallback(section='menu')),
+            ('🏠 Меню', AdminSectionCallback(section='menu')),
         ], 1, 1, 1),
     )
 
@@ -200,7 +200,7 @@ def _admin_keyboard():
 def _back_keyboard(section: str = 'menu', page: int = 0):
     if section == 'menu':
         return inline_keyboard([
-            ('⌂ Меню', AdminSectionCallback(section='menu')),
+            ('🏠 Меню', AdminSectionCallback(section='menu')),
         ])
 
     section_labels = {
@@ -209,12 +209,13 @@ def _back_keyboard(section: str = 'menu', page: int = 0):
         'promos': '← К промокодам',
         'users': '← К пользователям',
     }
+
     return inline_keyboard([
         (
             section_labels.get(section, '← К разделу'),
             AdminSectionCallback(section=section, page=page),
         ),
-        ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ('🏠 Меню', AdminSectionCallback(section='menu')),
     ])
 
 
@@ -236,7 +237,7 @@ def _admin_navigation(section: str, page: int, total: int) -> list[tuple[str, An
             AdminSectionCallback(section=section, page=page + 1),
         ))
 
-    return buttons + [('⌂ Меню', AdminSectionCallback(section='menu'))]
+    return buttons + [('🏠 Меню', AdminSectionCallback(section='menu'))]
 
 
 def _user_navigation(
@@ -264,7 +265,7 @@ def _user_navigation(
             '← Пользователь',
             UserSectionCallback(user_id=user_id, section='card'),
         ),
-        ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ('🏠 Меню', AdminSectionCallback(section='menu')),
     ]
 
 
@@ -362,7 +363,7 @@ def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
             AdminSectionCallback(section='users', page=page + 1),
         ))
 
-    buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
+    buttons.append(('🏠 Меню', AdminSectionCallback(section='menu')))
     return inline_keyboard(buttons, 2, 1, 2, 1)
 
 
@@ -515,14 +516,14 @@ def _promocode_form_keyboard(promocode_id: int = 0, page: int = 0):
                 action='list', promocode_id=promocode_id, page=page,
             ),
         ),
-        ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ('🏠 Меню', AdminSectionCallback(section='menu')),
     ])
 
 
 def _empty_promocodes_keyboard():
     return inline_keyboard([
         ('➕ Добавить промокод', PromocodeActionCallback(action='create')),
-        ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ('🏠 Меню', AdminSectionCallback(section='menu')),
     ])
 
 
@@ -600,6 +601,7 @@ async def _resolve_availability(
     if status == 'available':
         if available_quantity is not None and available_quantity < 1:
             raise ValueError('Доступное количество должно быть больше нуля')
+
         available_quantity = (
             available_quantity or availability.requested_quantity or 1
         )
@@ -1084,7 +1086,7 @@ async def promocode_action(
                         page=callback_data.page,
                     ),
                 ),
-                ('⌂ Меню', AdminSectionCallback(section='menu')),
+                ('🏠 Меню', AdminSectionCallback(section='menu')),
             ]),
         )
 
