@@ -1,48 +1,48 @@
 <!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#171714">
-    <title>{% block title %}Fyvessa{% endblock %}</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        ink: '#171714', cream: '#f5f1e8', coral: '#ed694b',
-                        sage: '#8ea58c', sand: '#dfd4c2'
-                    },
-                    fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
-                    boxShadow: { soft: '0 18px 50px rgba(23,23,20,.08)' }
-                }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#171714">
+  <title>{% block title %}Fyvessa{% endblock %}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    ink: '#171714', cream: '#f5f1e8', coral: '#ed694b',
+                    sage: '#8ea58c', sand: '#dfd4c2'
+                },
+                fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
+                boxShadow: { soft: '0 18px 50px rgba(23,23,20,.08)' }
             }
         }
-    </script>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+    }
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
-    <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <a href="/" class="text-xl font-black tracking-[-0.06em]">FYVESSA<span class="text-coral">.</span></a>
-        <nav class="flex items-center gap-1 text-sm font-semibold">
-            <a href="/catalog" class="rounded-full px-3 py-2 hover:bg-white">Каталог</a>
-            <a href="/favorites" class="rounded-full px-3 py-2 hover:bg-white" aria-label="Избранное">♡</a>
-            <a href="/profile" class="rounded-full px-3 py-2 hover:bg-white" aria-label="Профиль">◉</a>
-            <a href="/cart" class="rounded-full bg-ink px-3 py-2 text-white" aria-label="Корзина">Корзина</a>
-        </nav>
-    </div>
+  <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+    <a href="/" class="text-xl font-black tracking-[-0.06em]">FYVESSA<span class="text-coral">.</span></a>
+    <nav class="flex items-center gap-1 text-sm font-semibold">
+      <a href="/catalog" class="rounded-full px-3 py-2 hover:bg-white">Каталог</a>
+      <a href="/favorites" class="rounded-full px-3 py-2 hover:bg-white" aria-label="Избранное">♡</a>
+      <a href="/profile" class="rounded-full px-3 py-2 hover:bg-white" aria-label="Профиль">◉</a>
+      <a href="/cart" class="rounded-full bg-ink px-3 py-2 text-white" aria-label="Корзина">Корзина</a>
+    </nav>
+  </div>
 </header>
 
 <main>{% block content %}{% endblock %}</main>
 
 <footer class="mx-auto mt-16 max-w-6xl border-t border-black/10 px-4 py-8 text-sm text-black/50">
-    <div class="flex items-center justify-between">
-        <span>Fyvessa · магазин в Telegram</span>
-        <a href="/recent" class="font-semibold text-ink">Недавно смотрели</a>
-    </div>
+  <div class="flex items-center justify-between">
+    <span>Fyvessa · магазин в Telegram</span>
+    <a href="/recent" class="font-semibold text-ink">Недавно смотрели</a>
+  </div>
 </footer>
 <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 z-50 hidden -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft"></div>
 <script src="{{ url_for('static', path='/app.js') }}"></script>

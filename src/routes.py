@@ -234,10 +234,10 @@ async def recent_fragment(request: Request, customer: RequestCustomer):
         {
             product.id: product
             for product in (
-                await Product.select()
-                .where(col(Product.id).in_([view.product_id for view in views]))
-                .all()
-            )
+            await Product.select()
+            .where(col(Product.id).in_([view.product_id for view in views]))
+            .all()
+        )
         }
         if views
         else {}
@@ -268,10 +268,10 @@ async def cart_fragment(request: Request, customer: RequestCustomer):
         {
             product.id: product
             for product in (
-                await Product.select()
-                .where(col(Product.id).in_([item.product_id for item in items]))
-                .all()
-            )
+            await Product.select()
+            .where(col(Product.id).in_([item.product_id for item in items]))
+            .all()
+        )
         }
         if items
         else {}
@@ -320,15 +320,18 @@ async def record_product_view(product_id: int, customer: RequestCustomer):
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
+
     view = await ProductView.select().filter_by(
         customer_id=customer.id,
         product_id=product_id,
     ).first()
+
     if view is None:
         ProductView(customer_id=customer.id, product_id=product_id).add()
     else:
         view.viewed_at = utcnow()
         view.add()
+
     product.views_count += 1
     product.add()
     return {"ok": True}
@@ -340,12 +343,15 @@ async def toggle_favorite(product_id: int, customer: RequestCustomer):
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
+
     favorite = await Favorite.select().filter_by(
         customer_id=customer.id, product_id=product_id
     ).first()
+
     if favorite is None:
         Favorite(customer_id=customer.id, product_id=product_id).add()
         return {"favorite": True}
+
     await favorite.delete()
     return {"favorite": False}
 
@@ -359,12 +365,12 @@ async def add_to_cart(
 ):
     if not 1 <= payload.quantity <= 999:
         raise HTTPException(status_code=422, detail="Quantity must be between 1 and 999")
+
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    item = await CartItem.select().filter_by(
-        customer_id=customer.id, product_id=product_id
-    ).first()
+
+    item = await CartItem.select().filter_by(customer_id=customer.id, product_id=product_id).first()
     if item is None:
         item = CartItem(
             customer_id=customer.id,
@@ -375,6 +381,7 @@ async def add_to_cart(
         item.quantity = min(item.quantity + payload.quantity, 999)
         item.updated_at = utcnow()
         item.add()
+
     product.cart_additions_count += 1
     product.add()
     return {"quantity": item.quantity}
@@ -392,13 +399,13 @@ async def remove_from_cart(product_id: int, customer: RequestCustomer):
 
 
 @plugin.setup()
-def configure_web(app: FastAPI) -> None:
+def configure_web(app: FastAPI):
     app.mount("/static", StaticFiles(directory=Path("static")), name="static")
     app.include_router(router)
 
     @app.on_event("startup")
     @transaction(1)
-    async def import_catalog_on_startup() -> None:
+    async def import_catalog_on_startup():
         try:
             report = await sync_catalog(Config.products_path)
             logger.info(

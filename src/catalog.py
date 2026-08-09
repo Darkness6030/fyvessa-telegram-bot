@@ -169,15 +169,19 @@ async def sync_catalog(path: str | Path) -> SyncReport:
             category.is_active = True
             if row.category_image_url:
                 category.image_url = row.category_image_url
+
             category.updated_at = now
             category.add()
 
         product = products.get(row.sku.casefold())
         values = row.model_dump(
-            exclude={"category", "category_image_url"}, exclude_none=False
+            exclude={"category", "category_image_url"},
+            exclude_none=False
         )
+
         values["category_id"] = category.id
         values["updated_at"] = now
+
         if product is None:
             Product(**values).add()
             created += 1

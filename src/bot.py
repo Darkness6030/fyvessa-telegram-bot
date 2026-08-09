@@ -31,5 +31,5 @@ async def create_dispatcher() -> Dispatcher:
 
 
 @plugin.run()
-async def run_bot(bot: Bot, dispatcher: Dispatcher) -> None:
+async def run_bot(bot: Bot, dispatcher: Dispatcher):
     await dispatcher.start_polling(bot)
