@@ -1,15 +1,16 @@
 src:
   bot:
     token: !env "TELEGRAM_TOKEN:"
+    api_url: !env "TELEGRAM_API_URL:"
   main_flow:
-    mini_app_url: !env "MINI_APP_URL:http://localhost:8080"
-    channel_url: !env "CHANNEL_URL:https://t.me/telegram"
-    support_username: !env "SUPPORT_USERNAME:telegram"
+    mini_app_url: !env "MINI_APP_URL:"
+    channel_url: !env "CHANNEL_URL:"
+    support_username: !env "SUPPORT_USERNAME:"
   admin_flow:
     admin_ids: !env "ADMIN_IDS:"
-    products_path: !env "PRODUCTS_PATH:assets/products.xlsx"
+    products_path: !env "PRODUCTS_PATH:"
   routes:
-    products_path: !env "PRODUCTS_PATH:assets/products.xlsx"
+    products_path: !env "PRODUCTS_PATH:"
 rewire:
   log:
     sinks:
@@ -20,7 +21,7 @@ rewire_fastapi:
     title: "Fyvessa Telegram Store"
     version: "1.0.0"
   uvicorn:
-    port: 8080
+    port: 8888
     host: "0.0.0.0"
   patch:
     swagger_hierarchical_tags: true
