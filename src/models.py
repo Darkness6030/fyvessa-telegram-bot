@@ -168,7 +168,7 @@ class User(SQLModel, table=True):
         user = await cls.get_by_id(user_id)
         if not user:
             return cls(
-                id=id,
+                id=user_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
@@ -287,7 +287,9 @@ class AvailabilityRequest(SQLModel, table=True):
         )
 
 
-class PromoCode(SQLModel, table=True):
+class Promocode(SQLModel, table=True):
+    __tablename__ = 'promocode'
+
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     code: str = Field(index=True)
@@ -301,8 +303,8 @@ class PromoCode(SQLModel, table=True):
         return self.add()
 
     @classmethod
-    async def get_by_id(cls, promo_id: int) -> Optional[Self]:
-        return await cls.select().filter_by(id=promo_id).first()
+    async def get_by_id(cls, promocode_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=promocode_id).first()
 
     @classmethod
     async def get_by_code(cls, code: str, active_only: bool = False) -> Optional[Self]:

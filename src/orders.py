@@ -14,7 +14,7 @@ from src.models import (
     Order,
     OrderItem,
     Product,
-    PromoCode,
+    Promocode,
     User,
 )
 from src.pricing import calculate_pricing, money, PricingLine
@@ -94,18 +94,18 @@ async def create_order_from_cart(
     if discount_mode not in {'none', 'personal', 'promo'}:
         raise HTTPException(status_code=422, detail='Неизвестный тип скидки')
 
-    promo = None
+    promocode = None
     personal_percent = Decimal('0')
     promo_percent = Decimal('0')
 
     if discount_mode == 'personal':
         personal_percent = user.personal_discount_percent
     elif discount_mode == 'promo':
-        promo = await PromoCode.get_by_code(promo_code, active_only=True)
-        if not promo:
+        promocode = await Promocode.get_by_code(promo_code, active_only=True)
+        if not promocode:
             raise HTTPException(status_code=422, detail='Промокод не найден или отключён')
 
-        promo_percent = promo.user_discount_percent
+        promo_percent = promocode.user_discount_percent
 
     if coins_requested < 0:
         raise HTTPException(status_code=422, detail='Количество коинов не может быть отрицательным')
@@ -136,7 +136,7 @@ async def create_order_from_cart(
         user_id=user.id,
         status='awaiting_payment',
         payment_status='not_paid',
-        promo_code_id=promo.id if promo else None,
+        promo_code_id=promocode.id if promocode else None,
         discount_mode=discount_mode,
         product_discount_total=pricing.product_discount,
         personal_discount_percent=personal_percent,
@@ -235,10 +235,10 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     order.bulat_share = pricing.bulat_share
     order.partner_reward = Decimal('0')
     if order.promo_code_id:
-        promo = await PromoCode.get_by_id(order.promo_code_id)
-        if promo:
+        promocode = await Promocode.get_by_id(order.promo_code_id)
+        if promocode:
             order.partner_reward = money(
-                order.paid_total * promo.partner_reward_percent / Decimal('100')
+                order.paid_total * promocode.partner_reward_percent / Decimal('100')
             )
 
     order.status = 'paid'

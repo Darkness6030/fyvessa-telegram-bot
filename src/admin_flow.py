@@ -20,7 +20,7 @@ from src.models import (
     AvailabilityRequest,
     Order,
     Product,
-    PromoCode,
+    Promocode,
     User,
 )
 from src.orders import cancel_order, confirm_payment, ORDER_STATUS_LABELS
@@ -59,8 +59,8 @@ class UserSectionCallback(CallbackData, prefix='usr'):
     section: str
 
 
-class PromoToggleCallback(CallbackData, prefix='promo'):
-    promo_id: int
+class PromocodeToggleCallback(CallbackData, prefix='promo'):
+    promocode_id: int
 
 
 AVAILABILITY_LABELS = {
@@ -69,6 +69,22 @@ AVAILABILITY_LABELS = {
     'unavailable': 'Нет в наличии',
     'on_request': 'Под заказ / уточняется',
     'used': 'Использовано в заказе',
+}
+
+AVAILABILITY_COMMAND_STATUSES = {
+    'available': 'available',
+    'есть': 'available',
+    'unavailable': 'unavailable',
+    'нет': 'unavailable',
+    'on_request': 'on_request',
+    'уточняется': 'on_request',
+}
+
+ORDER_COMMAND_ACTIONS = {
+    'paid': 'paid',
+    'оплачен': 'paid',
+    'cancel': 'cancel',
+    'отмена': 'cancel',
 }
 
 
@@ -82,7 +98,7 @@ def _cart_keyboard():
 
 
 def _availability_keyboard(request_id: int):
-    return inline_keyboard([
+    buttons = [
         (
             text,
             AvailabilityActionCallback(
@@ -94,7 +110,9 @@ def _availability_keyboard(request_id: int):
             ('❌ Нет', 'unavailable'),
             ('⏳ Уточняется', 'on_request'),
         )
-    ], 2, 1)
+    ]
+    buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
+    return inline_keyboard(buttons, 2, 1, 1)
 
 
 async def notify_availability_request(
@@ -131,7 +149,8 @@ async def notify_payment_review(order: Order, user: User) -> bool:
                 '✖️ Отменить заказ',
                 OrderActionCallback(order_id=order.id, action='cancel'),
             ),
-        ]),
+            ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ], 1, 1, 1),
     )
 
 
@@ -178,12 +197,28 @@ def _parse_section(value: str) -> tuple[str, int]:
 
 
 def _back_keyboard(section: str = 'menu', page: int = 0):
+    if section == 'menu':
+        return inline_keyboard([
+            ('⌂ Меню', AdminSectionCallback(section='menu')),
+        ])
+
+    section_labels = {
+        'availability': '← К запросам',
+        'orders': '← К заказам',
+        'promos': '← К промокодам',
+        'users': '← К пользователям',
+    }
     return inline_keyboard([
         (
-            '← Назад',
+            section_labels.get(section, '← К разделу'),
             AdminSectionCallback(section=_page_section(section, page)),
         ),
+        ('⌂ Меню', AdminSectionCallback(section='menu')),
     ])
+
+
+async def _answer_with_navigation(message: Message, text: str, section: str = 'menu'):
+    return await message.answer(text, reply_markup=_back_keyboard(section))
 
 
 def _admin_navigation(section: str, page: int, total: int) -> list[tuple[str, Any]]:
@@ -228,6 +263,7 @@ def _user_navigation(
             '← Пользователь',
             UserSectionCallback(user_id=user_id, section='card'),
         ),
+        ('⌂ Меню', AdminSectionCallback(section='menu')),
     ]
 
 
@@ -237,12 +273,13 @@ def _help_text() -> str:
         '/admin — панель с очередями и сводкой\n'
         '/user &lt;username/Telegram ID&gt; — карточка пользователя\n'
         '/discount &lt;username/ID&gt; &lt;0–100&gt; — персональная скидка\n'
-        '/availability &lt;ID&gt; &lt;available|unavailable|on_request&gt; '
+        '/availability &lt;ID&gt; &lt;есть|нет|уточняется&gt; '
         '[количество] [комментарий]\n'
-        '/order &lt;ID&gt; &lt;paid|cancel&gt; — изменить заказ\n'
+        '/order &lt;ID&gt; &lt;оплачен|отмена&gt; — изменить заказ\n'
         '/promo CODE | Партнёр | скидка | вознаграждение — создать или обновить\n'
         '/promo_toggle CODE — включить или выключить промокод\n'
         '/sync_products — синхронизировать assets/products.xlsx\n\n'
+        'Также поддерживаются значения available, unavailable, on_request, paid и cancel.\n\n'
         'Безопасность: команды и кнопки работают только в настроенном админском чате.'
     )
 
@@ -272,7 +309,7 @@ async def _sync_text() -> str:
 
 @router.message(Command('sync_products'))
 async def sync_products_command(message: Message):
-    await message.answer(await _sync_text())
+    await _answer_with_navigation(message, await _sync_text())
 
 
 async def _user_text(user: User) -> str:
@@ -336,9 +373,10 @@ def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
 async def user_command(message: Message, command: CommandObject):
     user = await User.find(command.args or '')
     if not user:
-        return await message.answer(
+        return await _answer_with_navigation(
+            message,
             'Пользователь не найден. Используйте <code>/user username</code> или '
-            '<code>/user 123456789</code>.'
+            '<code>/user 123456789</code>.',
         )
 
     await message.answer(
@@ -351,6 +389,7 @@ def _order_text(order: Order, user: Optional[User] = None) -> str:
     username = f' (@{html.escape(user.username)})' if user and user.username else ''
     return (
         f'<b>{html.escape(order.number)}</b> · {order.paid_total} ₽\n'
+        f'ID заказа: <code>{order.id}</code>\n'
         f'{ORDER_STATUS_LABELS.get(order.status, order.status)} · '
         f'{order.created_at:%d.%m.%Y %H:%M}\n'
         f'Пользователь: <code>{order.user_id}</code>{username}'
@@ -393,13 +432,19 @@ async def _availability_text(availability: AvailabilityRequest) -> str:
         return f'<b>Запрос №{availability.id}</b> · пользователь удалён'
 
     username = f'@{html.escape(user.username)}' if user.username else 'без username'
-    return (
+    details = (
         f'<b>Запрос №{availability.id}</b> · '
         f'{AVAILABILITY_LABELS.get(availability.status, availability.status)}\n'
         f'Товар: {html.escape(product.name if product else 'удалён')}\n'
         f'Количество: {availability.requested_quantity or 1}\n'
         f'Пользователь: <code>{user.id}</code> ({username})'
     )
+    if availability.available_quantity is not None:
+        details += f'\nПодтверждено: {availability.available_quantity} шт.'
+    if availability.admin_comment:
+        details += f'\nКомментарий: {html.escape(availability.admin_comment)}'
+
+    return details
 
 
 def _availability_admin_keyboard(
@@ -410,9 +455,7 @@ def _availability_admin_keyboard(
         [
             (
                 text,
-                AvailabilityActionCallback(
-                    request_id=availability.id, status=status,
-                ),
+                AvailabilityActionCallback(request_id=availability.id, status=status),
             )
             for text, status in (
             ('✅ Есть', 'available'),
@@ -433,20 +476,20 @@ def _availability_admin_keyboard(
     return inline_keyboard(buttons + navigation, 2, 1, 2, 1)
 
 
-def _promo_text(promo: PromoCode) -> str:
+def _promocode_text(promocode: Promocode) -> str:
     return (
-        f'<b>{html.escape(promo.code)}</b> · {html.escape(promo.partner_name)}\n'
-        f'Скидка {promo.user_discount_percent}% · '
-        f'вознаграждение {promo.partner_reward_percent}% · '
-        f'{'активен' if promo.is_active else 'отключён'}'
+        f'<b>{html.escape(promocode.code)}</b> · {html.escape(promocode.partner_name)}\n'
+        f'Скидка {promocode.user_discount_percent}% · '
+        f'вознаграждение {promocode.partner_reward_percent}% · '
+        f'{'активен' if promocode.is_active else 'отключён'}'
     )
 
 
-def _promo_keyboard(promo: PromoCode, page: int, total: int):
+def _promocode_keyboard(promocode: Promocode, page: int, total: int):
     return inline_keyboard([
         (
-            'Выключить' if promo.is_active else 'Включить',
-            PromoToggleCallback(promo_id=promo.id),
+            'Выключить' if promocode.is_active else 'Включить',
+            PromocodeToggleCallback(promocode_id=promocode.id),
         ),
         *_admin_navigation('promos', page, total),
     ], 1, 2, 1)
@@ -463,10 +506,14 @@ async def _resolve_availability(
         return False
 
     if status not in {'available', 'unavailable', 'on_request'}:
-        raise ValueError('Неизвестный статус')
+        raise ValueError('Статус: есть, нет или уточняется')
 
     if status == 'available':
-        available_quantity = available_quantity or availability.requested_quantity or 1
+        if available_quantity is not None and available_quantity < 1:
+            raise ValueError('Доступное количество должно быть больше нуля')
+        available_quantity = (
+            available_quantity or availability.requested_quantity or 1
+        )
     elif status == 'unavailable':
         available_quantity = 0
     else:
@@ -543,18 +590,21 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
             _user_keyboard(user.id, page, len(users)),
         )
     elif section == 'promos':
-        promos = await PromoCode.get_recent()
-        if not promos:
+        promocodes = await Promocode.get_recent()
+        if not promocodes:
             return await callback.answer(
                 'Промокодов нет. Создание:\n'
-                '/promo CODE | Партнёр | 10 | 10',
+                '/promo CODE | Партнёр | Процент скидки | Процент вознаграждения',
                 show_alert=True,
             )
-        page = min(page, len(promos) - 1)
-        promo = promos[page]
+
+        page = min(page, len(promocodes) - 1)
+        promocode = promocodes[page]
         await _edit_message(
-            callback, _promo_text(promo), _promo_keyboard(promo, page, len(promos)),
+            callback, _promocode_text(promocode),
+            _promocode_keyboard(promocode, page, len(promocodes)),
         )
+
     elif section == 'summary':
         products = await Product.get_all()
         users = await User.get_all()
@@ -642,12 +692,7 @@ async def availability_action(callback: CallbackQuery, callback_data: Availabili
     await _edit_message(
         callback,
         await _availability_text(availability),
-        inline_keyboard([
-            (
-                '← К запросам',
-                AdminSectionCallback(section='availability'),
-            ),
-        ]),
+        _back_keyboard('availability'),
     )
 
     await callback.answer('Ответ отправлен')
@@ -658,33 +703,47 @@ async def availability_action(callback: CallbackQuery, callback_data: Availabili
 async def availability_command(message: Message, command: CommandObject):
     parts = (command.args or '').split(maxsplit=3)
     if len(parts) < 2 or not parts[0].isdigit():
-        return await message.answer('Формат: <code>/availability ID available 3 комментарий</code>')
+        return await _answer_with_navigation(
+            message,
+            'Формат: <code>/availability ID есть 3 комментарий</code>',
+            'availability',
+        )
 
     quantity = None
     comment = None
     if len(parts) >= 3:
-        if parts[2].isdigit():
+        try:
             quantity = int(parts[2])
             comment = parts[3] if len(parts) == 4 else None
-        else:
+        except ValueError:
             comment = ' '.join(parts[2:])
 
     availability = await AvailabilityRequest.get_by_id(int(parts[0]))
     if not availability:
-        return await message.answer('Запрос не найден.')
+        return await _answer_with_navigation(
+            message, 'Запрос не найден.', 'availability',
+        )
 
     try:
         changed = await _resolve_availability(
             availability,
-            parts[1],
+            AVAILABILITY_COMMAND_STATUSES.get(
+                parts[1].casefold(), parts[1].casefold(),
+            ),
             quantity,
             comment,
             message.from_user.id
         )
     except ValueError as exc:
-        return await message.answer(html.escape(str(exc)))
+        return await _answer_with_navigation(
+            message, html.escape(str(exc)), 'availability',
+        )
 
-    await message.answer('Ответ отправлен.' if changed else 'Запрос уже обработан.')
+    await _answer_with_navigation(
+        message,
+        'Ответ отправлен.' if changed else 'Запрос уже обработан.',
+        'availability',
+    )
 
 
 async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
@@ -695,7 +754,7 @@ async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
         changed = await cancel_order(order, admin_id)
         text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
     else:
-        raise ValueError('Неизвестное действие')
+        raise ValueError('Действие: оплачен или отмена')
 
     if changed:
         user = await User.get_by_id(order.user_id)
@@ -745,19 +804,33 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
 async def order_command(message: Message, command: CommandObject):
     parts = (command.args or '').split()
     if len(parts) != 2 or not parts[0].isdigit():
-        await message.answer('Формат: <code>/order ID paid</code> или <code>/order ID cancel</code>')
-        return
+        return await _answer_with_navigation(
+            message,
+            'Формат: <code>/order ID оплачен</code> или <code>/order ID отмена</code>',
+            'orders',
+        )
 
     order = await Order.get_by_id(int(parts[0]))
     if not order:
-        return await message.answer('Заказ не найден.')
+        return await _answer_with_navigation(
+            message, 'Заказ не найден.', 'orders',
+        )
 
     try:
-        changed = await _apply_order_action(order, parts[1], message.from_user.id)
+        action = ORDER_COMMAND_ACTIONS.get(
+            parts[1].casefold(), parts[1].casefold(),
+        )
+        changed = await _apply_order_action(order, action, message.from_user.id)
     except ValueError as exc:
-        return await message.answer(html.escape(str(exc)))
+        return await _answer_with_navigation(
+            message, html.escape(str(exc)), 'orders',
+        )
 
-    await message.answer('Готово.' if changed else 'Это действие уже выполнено.')
+    await _answer_with_navigation(
+        message,
+        'Готово.' if changed else 'Это действие уже выполнено.',
+        'orders',
+    )
 
 
 @router.message(Command('discount'))
@@ -765,7 +838,9 @@ async def order_command(message: Message, command: CommandObject):
 async def discount_command(message: Message, command: CommandObject):
     parts = (command.args or '').rsplit(maxsplit=1)
     if len(parts) != 2:
-        return await message.answer('Формат: <code>/discount username 5</code>')
+        return await _answer_with_navigation(
+            message, 'Формат: <code>/discount username 5</code>',
+        )
 
     user = await User.find(parts[0])
     try:
@@ -773,80 +848,113 @@ async def discount_command(message: Message, command: CommandObject):
     except InvalidOperation:
         percent = Decimal('-1')
     if not user or not Decimal('0') <= percent <= Decimal('100'):
-        await message.answer('Пользователь не найден или процент вне диапазона 0–100.')
+        await _answer_with_navigation(
+            message,
+            'Пользователь не найден или процент вне диапазона 0–100.',
+        )
         return
 
     user.personal_discount_percent = percent
     user.updated_at = datetime.now()
     user.add()
 
-    await message.answer(f'Персональная скидка пользователя {user.id}: {percent}%.')
+    await message.answer(
+        f'Персональная скидка пользователя {user.id}: {percent}%.',
+        reply_markup=_user_keyboard(user.id),
+    )
 
 
 @router.message(Command('promo'))
 @transaction(1)
-async def promo_command(message: Message, command: CommandObject):
+async def promocode_command(message: Message, command: CommandObject):
     parts = [part.strip() for part in (command.args or '').split('|')]
     if len(parts) != 4:
-        return await message.answer('Формат: <code>/promo CODE | Имя партнёра | 10 | 10</code>')
+        return await _answer_with_navigation(
+            message,
+            'Формат: <code>/promo CODE | Имя партнёра | Процент скидки | '
+            'Процент вознаграждения</code>',
+            'promos',
+        )
 
     try:
         user_percent = Decimal(parts[2].replace(',', '.'))
         partner_percent = Decimal(parts[3].replace(',', '.'))
     except InvalidOperation:
-        return await message.answer('Проценты должны быть числами.')
+        return await _answer_with_navigation(
+            message, 'Проценты должны быть числами.', 'promos',
+        )
 
     if not all((parts[0], parts[1])) or not all(
         Decimal('0') <= value <= Decimal('100')
         for value in (user_percent, partner_percent)
     ):
-        return await message.answer('Проверьте код, имя и диапазон процентов 0–100.')
+        return await _answer_with_navigation(
+            message,
+            'Проверьте код, имя и диапазон процентов 0–100.',
+            'promos',
+        )
 
     code = parts[0].upper()
-    promo = await PromoCode.get_by_code(code)
-    if not promo:
-        promo = PromoCode(code=code, partner_name=parts[1]).add()
+    promocode = await Promocode.get_by_code(code)
+    if not promocode:
+        promocode = Promocode(code=code, partner_name=parts[1])
 
-    promo.partner_name = parts[1]
-    promo.user_discount_percent = user_percent
-    promo.partner_reward_percent = partner_percent
-    promo.is_active = True
-    promo.add()
+    promocode.partner_name = parts[1]
+    promocode.user_discount_percent = user_percent
+    promocode.partner_reward_percent = partner_percent
+    promocode.is_active = True
+    promocode.add()
 
-    await message.answer(f'Промокод <b>{html.escape(code)}</b> сохранён и активен.')
+    await _answer_with_navigation(
+        message,
+        f'Промокод <b>{html.escape(code)}</b> сохранён и активен.',
+        'promos',
+    )
 
 
 @router.message(Command('promo_toggle'))
 @transaction(1)
-async def promo_toggle_command(message: Message, command: CommandObject):
+async def promocode_toggle_command(message: Message, command: CommandObject):
     code = (command.args or '').strip().upper()
-    promo = await PromoCode.get_by_code(code)
-    if not promo:
-        return await message.answer('Промокод не найден.')
+    promocode = await Promocode.get_by_code(code)
+    if not promocode:
+        return await _answer_with_navigation(
+            message, 'Промокод не найден.', 'promos',
+        )
 
-    promo.toggle()
-    await message.answer(f'{promo.code}: {'включён' if promo.is_active else 'отключён'}.')
+    promocode.toggle()
+    await _answer_with_navigation(
+        message,
+        f'{promocode.code}: {'включён' if promocode.is_active else 'отключён'}.',
+        'promos',
+    )
 
 
-@router.callback_query(PromoToggleCallback.filter())
+@router.callback_query(PromocodeToggleCallback.filter())
 @transaction(1)
-async def promo_toggle_callback(callback: CallbackQuery, callback_data: PromoToggleCallback):
-    promo = await PromoCode.get_by_id(callback_data.promo_id)
-    if not promo:
+async def promocode_toggle_callback(
+    callback: CallbackQuery, callback_data: PromocodeToggleCallback,
+):
+    promocode = await Promocode.get_by_id(callback_data.promocode_id)
+    if not promocode:
         return await callback.answer('Промокод не найден', show_alert=True)
 
-    promo.toggle()
-    promos = await PromoCode.get_recent()
+    promocode.toggle()
+    promocodes = await Promocode.get_recent()
     page = next(
-        (index for index, item in enumerate(promos) if item.id == promo.id), 0,
+        (
+            index for index, item in enumerate(promocodes)
+            if item.id == promocode.id
+        ),
+        0,
     )
 
     await _edit_message(
-        callback, _promo_text(promo),
-        _promo_keyboard(promo, page, max(len(promos), 1)),
+        callback, _promocode_text(promocode),
+        _promocode_keyboard(promocode, page, max(len(promocodes), 1)),
     )
 
-    await callback.answer('Включён' if promo.is_active else 'Отключён')
+    await callback.answer('Включён' if promocode.is_active else 'Отключён')
 
 
 @plugin.setup()
