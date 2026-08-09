@@ -34,8 +34,7 @@ function telegramAuthorization() {
 function telegramHeaders() {
     const initData = telegramAuthorization();
     return {
-        'Authorization': initData,
-        'X-Telegram-Init-Data': initData
+        'Authorization': initData
     };
 }
 

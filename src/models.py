@@ -1,11 +1,11 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, Self
+from typing import Optional, Self, Sequence
 
 from rewire import simple_plugin
 from rewire_sqlmodel import SQLModel
-from sqlalchemy import BigInteger, Text
-from sqlmodel import Field
+from sqlalchemy import BigInteger, func, Text
+from sqlmodel import col, Field
 
 plugin = simple_plugin()
 
@@ -18,9 +18,29 @@ class Category(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
+    @classmethod
+    async def get_by_id(cls, category_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=category_id).first()
+
+    @classmethod
+    async def get_active(cls) -> list[Self]:
+        return list(
+            await cls.select()
+            .where(col(cls.is_active).is_(True))
+            .order_by(cls.name)
+            .all()
+        )
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
+
 
 class Product(SQLModel, table=True):
     id: int = Field(primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
     sku: str = Field(index=True)
     category_id: int = Field(foreign_key='category.id', index=True)
     name: str = Field(index=True)
@@ -38,12 +58,54 @@ class Product(SQLModel, table=True):
     views_count: int = 0
     cart_additions_count: int = 0
     purchases_count: int = 0
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
 
     @property
     def current_price(self) -> Decimal:
         return self.discount_price or self.retail_price
+
+    @classmethod
+    async def get_by_id(cls, product_id: int, active_only: bool = False) -> Optional[Self]:
+        query = cls.select().filter_by(id=product_id)
+        if active_only:
+            query = query.filter_by(is_active=True)
+        return await query.first()
+
+    @classmethod
+    async def get_by_sku(cls, sku: str, active_only: bool = False) -> Optional[Self]:
+        query = cls.select().filter_by(sku=sku)
+        if active_only:
+            query = query.filter_by(is_active=True)
+        return await query.first()
+
+    @classmethod
+    async def get_by_ids(cls, product_ids: Sequence[int], active_only: bool = False) -> list[Self]:
+        if not product_ids:
+            return []
+        query = cls.select().where(col(cls.id).in_(product_ids))
+        if active_only:
+            query = query.where(col(cls.is_active).is_(True))
+        return list(await query.all())
+
+    @classmethod
+    async def search(
+        cls, q: Optional[str] = None, category_id: Optional[int] = None,
+        min_price: Optional[int] = None, max_price: Optional[int] = None,
+    ) -> list[Self]:
+        query = cls.select().where(col(cls.is_active).is_(True))
+        if q and q.strip():
+            query = query.where(col(cls.name).ilike(f'%{q.strip()}%'))
+        if category_id is not None:
+            query = query.where(cls.category_id == category_id)
+        current_price = func.coalesce(cls.discount_price, cls.retail_price)
+        if min_price is not None:
+            query = query.where(current_price >= min_price)
+        if max_price is not None:
+            query = query.where(current_price <= max_price)
+        return list(await query.order_by(cls.name).all())
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
 
 
 class User(SQLModel, table=True):
@@ -72,20 +134,45 @@ class User(SQLModel, table=True):
         return all((self.first_name, self.last_name, self.birth_date, self.phone_number))
 
     @classmethod
+    async def get_by_id(cls, user_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=user_id).first()
+
+    @classmethod
+    async def find(cls, value: str) -> Optional[Self]:
+        value = value.strip().lstrip('@')
+        if not value:
+            return None
+
+        if value.isdigit():
+            return await cls.get_by_id(int(value))
+
+        return await cls.select().where(func.lower(cls.username) == value.lower()).first()
+
+    @classmethod
+    async def get_recent(cls, limit: int = 15) -> list[Self]:
+        return list(await cls.select().order_by(cls.created_at.desc()).limit(limit).all())
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
+
+    @classmethod
     async def get_or_create(
         cls,
-        id: int,
+        user_id: int,
         username: Optional[str],
         first_name: Optional[str],
         last_name: Optional[str],
+        referrer_id: Optional[int] = None,
     ) -> Self:
-        user = await cls.select().filter_by(id=id).first()
+        user = await cls.get_by_id(user_id)
         if not user:
             return cls(
                 id=id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
+                referrer_id=referrer_id,
             ).add()
 
         user.username = username
@@ -99,12 +186,34 @@ class Favorite(SQLModel, table=True):
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
 
+    @classmethod
+    async def get_for_user(cls, user_id: int) -> list[Self]:
+        return list(await cls.select().filter_by(user_id=user_id).all())
+
+    @classmethod
+    async def get_for_product(cls, user_id: int, product_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(user_id=user_id, product_id=product_id).first()
+
 
 class ProductView(SQLModel, table=True):
     id: int = Field(primary_key=True)
     viewed_at: datetime = Field(default_factory=datetime.now, index=True)
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
+
+    @classmethod
+    async def get_for_user(cls, user_id: int, limit: int = 20) -> list[Self]:
+        return list(
+            await cls.select()
+            .filter_by(user_id=user_id)
+            .order_by(cls.viewed_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @classmethod
+    async def get_for_product(cls, user_id: int, product_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(user_id=user_id, product_id=product_id).first()
 
 
 class CartItem(SQLModel, table=True):
@@ -114,6 +223,14 @@ class CartItem(SQLModel, table=True):
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
     quantity: int = Field(default=1, ge=1, le=999)
+
+    @classmethod
+    async def get_for_user(cls, user_id: int) -> list[Self]:
+        return list(await cls.select().filter_by(user_id=user_id).all())
+
+    @classmethod
+    async def get_for_product(cls, user_id: int, product_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(user_id=user_id, product_id=product_id).first()
 
 
 class AvailabilityRequest(SQLModel, table=True):
@@ -128,6 +245,47 @@ class AvailabilityRequest(SQLModel, table=True):
     admin_comment: Optional[str] = None
     resolved_at: Optional[datetime] = None
 
+    @classmethod
+    async def get_by_id(cls, request_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=request_id).first()
+
+    @classmethod
+    async def get_pending(cls, user_id: int, product_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(user_id=user_id, product_id=product_id, status='pending').first()
+
+    @classmethod
+    async def get_recent(
+        cls,
+        user_id: Optional[int] = None,
+        pending_only: bool = False,
+        limit: Optional[int] = 15,
+    ) -> list[Self]:
+        query = cls.select()
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+
+        if pending_only:
+            query = query.filter_by(status='pending')
+
+        query = query.order_by(cls.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+
+        return list(await query.all())
+
+    @classmethod
+    async def get_latest_for_products(cls, user_id: int, product_ids: Sequence[int]) -> list[Self]:
+        if not product_ids:
+            return []
+
+        return list(
+            await cls.select()
+            .where(cls.user_id == user_id)
+            .where(col(cls.product_id).in_(product_ids))
+            .order_by(cls.created_at.desc())
+            .all()
+        )
+
 
 class PromoCode(SQLModel, table=True):
     id: int = Field(primary_key=True)
@@ -137,6 +295,26 @@ class PromoCode(SQLModel, table=True):
     user_discount_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
     partner_reward_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
     is_active: bool = Field(default=True, index=True)
+
+    def toggle(self) -> Self:
+        self.is_active = not self.is_active
+        return self.add()
+
+    @classmethod
+    async def get_by_id(cls, promo_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=promo_id).first()
+
+    @classmethod
+    async def get_by_code(cls, code: str, active_only: bool = False) -> Optional[Self]:
+        query = cls.select().where(func.upper(cls.code) == code.strip().upper())
+        if active_only:
+            query = query.where(col(cls.is_active).is_(True))
+
+        return await query.first()
+
+    @classmethod
+    async def get_recent(cls, limit: int = 15) -> list[Self]:
+        return list(await cls.select().order_by(cls.created_at.desc()).limit(limit).all())
 
 
 class Order(SQLModel, table=True):
@@ -164,6 +342,30 @@ class Order(SQLModel, table=True):
     paid_at: Optional[datetime] = Field(default=None, index=True)
     paid_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
 
+    @classmethod
+    async def get_by_id(cls, order_id: int, user_id: Optional[int] = None) -> Optional[Self]:
+        query = cls.select().filter_by(id=order_id)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+
+        return await query.first()
+
+    @classmethod
+    async def get_recent(cls, user_id: Optional[int] = None, limit: Optional[int] = 15) -> list[Self]:
+        query = cls.select()
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+
+        query = query.order_by(cls.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+
+        return list(await query.all())
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
+
 
 class OrderItem(SQLModel, table=True):
     id: int = Field(primary_key=True)
@@ -178,6 +380,10 @@ class OrderItem(SQLModel, table=True):
     wholesale_price_snapshot: Decimal = Field(max_digits=12, decimal_places=2)
     owner_snapshot: str
     owner_share_percent_snapshot: Decimal = Field(max_digits=5, decimal_places=2)
+
+    @classmethod
+    async def get_for_order(cls, order_id: int) -> list[Self]:
+        return list(await cls.select().filter_by(order_id=order_id).all())
 
 
 class CoinTransaction(SQLModel, table=True):

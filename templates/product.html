@@ -4,7 +4,7 @@
 <section class="mx-auto grid max-w-5xl gap-7 px-4 pt-6 sm:grid-cols-2 sm:pt-10">
   <div class="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-sand shadow-soft">
     {% if product.image_url %}
-    <img src="{{ product.image_url }}" alt="{{ product.name }}" class="h-full w-full object-cover">
+    <img alt="{{ product.name }}" class="h-full w-full object-cover" src="{{ product.image_url }}">
     {% else %}
     <div class="product-placeholder flex h-full items-end p-10 text-7xl font-black text-white/90">
       {{ product.name[:1] }}
@@ -20,7 +20,7 @@
     </div>
   </div>
   <div class="flex flex-col justify-center sm:py-8">
-    <a href="/catalog?category_id={{ category.id if category else '' }}" class="text-xs font-black uppercase tracking-[.2em] text-coral">
+    <a class="text-xs font-black uppercase tracking-[.2em] text-coral" href="/catalog?category_id={{ category.id if category else '' }}">
       {{ category.name if category else 'Каталог' }}
     </a>
     <h1 class="mt-3 text-4xl font-black leading-none tracking-[-.05em] sm:text-6xl">{{ product.name }}</h1>
@@ -36,12 +36,12 @@
       <p class="mt-2 whitespace-pre-line text-sm leading-relaxed">{{ product.characteristics }}</p></div>
     {% endif %}
     <div class="mt-7 grid grid-cols-[1fr_auto] gap-2">
-      <button onclick="addToCart({{ product.id }}, 1, this)" class="rounded-2xl bg-ink px-5 py-4 font-black text-white">Добавить в корзину</button>
-      <button data-favorite-product-id="{{ product.id }}" onclick="toggleFavorite({{ product.id }}, this)" class="grid h-14 w-14 place-items-center rounded-2xl border border-black/10 bg-white text-2xl">♡</button>
+      <button class="rounded-2xl bg-ink px-5 py-4 font-black text-white" onclick="addToCart({{ product.id }}, 1, this)">Добавить в корзину</button>
+      <button class="grid h-14 w-14 place-items-center rounded-2xl border border-black/10 bg-white text-2xl" data-favorite-product-id="{{ product.id }}" onclick="toggleFavorite({{ product.id }}, this)">♡</button>
     </div>
-    <form data-availability-form data-product-id="{{ product.id }}" class="mt-2 flex gap-2">
+    <form class="mt-2 flex gap-2" data-availability-form data-product-id="{{ product.id }}">
       <label class="sr-only" for="availability-quantity">Количество</label>
-      <input id="availability-quantity" name="quantity" type="number" min="1" max="999" value="1" class="w-20 rounded-2xl border border-black/15 bg-white px-3 text-center font-black">
+      <input class="w-20 rounded-2xl border border-black/15 bg-white px-3 text-center font-black" id="availability-quantity" max="999" min="1" name="quantity" type="number" value="1">
       <button class="flex-1 rounded-2xl border border-black/15 px-5 py-4 font-black">Узнать наличие</button>
     </form>
     <p class="mt-3 text-center text-xs text-black/40">Точный остаток и количество подтверждает администратор.</p>

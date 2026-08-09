@@ -34,31 +34,26 @@ class PricingResult:
 
 def calculate_pricing(
     lines: list[PricingLine],
-    personal_discount_percent: Decimal = Decimal('0'),
-    promo_discount_percent: Decimal = Decimal('0'),
+    personal_percent: Decimal = Decimal('0'),
+    promo_percent: Decimal = Decimal('0'),
     coins_requested: Decimal = Decimal('0'),
 ) -> PricingResult:
     if not lines or any(line.quantity < 1 for line in lines):
         raise ValueError('At least one positive-quantity line is required')
 
-    if personal_discount_percent and promo_discount_percent:
+    if personal_percent and promo_percent:
         raise ValueError('Personal discount and promo code cannot be combined')
 
-    discount_percent = personal_discount_percent or promo_discount_percent
+    discount_percent = personal_percent or promo_percent
     if not Decimal('0') <= discount_percent <= Decimal('100'):
         raise ValueError('Discount percent must be between 0 and 100')
 
     if coins_requested < 0:
         raise ValueError('Coins cannot be negative')
 
-    retail_subtotal = money(
-        sum(line.retail_price * line.quantity for line in lines)
-    )
-
+    retail_subtotal = money(sum(line.retail_price * line.quantity for line in lines))
     sale_subtotal = money(sum(line.sale_price * line.quantity for line in lines))
-    wholesale_total = money(
-        sum(line.wholesale_price * line.quantity for line in lines)
-    )
+    wholesale_total = money(sum(line.wholesale_price * line.quantity for line in lines))
 
     product_discount = money(retail_subtotal - sale_subtotal)
     order_discount = money(sale_subtotal * discount_percent / Decimal('100'))

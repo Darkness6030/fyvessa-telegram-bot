@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional
 
 from aiogram import Bot, Dispatcher
@@ -6,11 +5,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramNetworkError
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from pydantic import BaseModel
-from rewire import LifecycleModule, config, logger, simple_plugin
+from rewire import config, DependenciesModule, logger, simple_plugin
 
 
 @config
@@ -20,30 +19,19 @@ class Config(BaseModel):
 
 
 plugin = simple_plugin()
-current_bot: Optional[Bot] = None
-
-
-def get_bot() -> Bot:
-    if current_bot is None:
-        raise RuntimeError('Telegram bot is not initialized')
-    return current_bot
 
 
 @plugin.setup()
 async def create_bot() -> Bot:
-    global current_bot
     session = AiohttpSession(api=TelegramAPIServer.from_base(Config.api_url), limit=1024) \
         if Config.api_url \
         else AiohttpSession(limit=1024)
 
-    bot = Bot(
+    return Bot(
         token=Config.token,
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    current_bot = bot
-    LifecycleModule.get().on_stop(bot.session.close)
-    return bot
 
 
 @plugin.setup()
@@ -55,9 +43,17 @@ async def create_dispatcher() -> Dispatcher:
 
 @plugin.run()
 async def run_bot(bot: Bot, dispatcher: Dispatcher):
-    while True:
-        try:
-            await dispatcher.start_polling(bot, close_bot_session=False)
-        except TelegramNetworkError as exc:
-            logger.error('Telegram polling is unavailable, retrying in 5 seconds: {}', exc)
-            await asyncio.sleep(5)
+    await dispatcher.start_polling(bot)
+
+
+async def send_message(user_id: int, message_text: str, **kwargs) -> bool:
+    try:
+        await get_bot().send_message(user_id, message_text, **kwargs)
+        return True
+    except TelegramAPIError as exc:
+        logger.error(f'Failed to send message to {user_id}: {exc}')
+        return False
+
+
+def get_bot() -> Bot:
+    return DependenciesModule.get().resolve(Bot)

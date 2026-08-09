@@ -1,20 +1,22 @@
-<form id="profile-form" class="space-y-4 rounded-[2rem] bg-white p-6 shadow-soft">
-  <label class="block"><span class="text-sm font-bold">Имя</span><input name="first_name" required value="{{ user.first_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Фамилия</span><input name="last_name" required value="{{ user.last_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Дата рождения</span><input name="birth_date" required type="date" value="{{ user.birth_date or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Номер телефона</span><input name="phone_number" required type="tel" value="{{ user.phone_number or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+<form class="space-y-4 rounded-[2rem] bg-white p-6 shadow-soft" id="profile-form">
+  <label class="block"><span class="text-sm font-bold">Имя</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="first_name" required value="{{ user.first_name or '' }}"></label>
+  <label class="block"><span class="text-sm font-bold">Фамилия</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="last_name" required value="{{ user.last_name or '' }}"></label>
+  <label class="block"><span class="text-sm font-bold">Дата рождения</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="birth_date" required type="date" value="{{ user.birth_date or '' }}"></label>
+  <label class="block"><span class="text-sm font-bold">Номер телефона</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="phone_number" required type="tel" value="{{ user.phone_number or '' }}"></label>
   <div class="rounded-xl bg-cream px-4 py-3 text-sm text-black/55">
     Telegram ID {{ user.id }} · @{{ user.username or 'без username' }}
   </div>
   <div class="grid grid-cols-2 gap-3">
-    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Коины</span><p class="font-black">{{ user.coin_balance }}</p></div>
-    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Скидка</span><p class="font-black">{{ user.personal_discount_percent }}%</p></div>
+    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Коины</span>
+      <p class="font-black">{{ user.coin_balance }}</p></div>
+    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Скидка</span>
+      <p class="font-black">{{ user.personal_discount_percent }}%</p></div>
   </div>
   <div class="grid grid-cols-3 gap-2 text-center text-sm">
-    <a href="/orders" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ orders_count }}</strong><span class="text-black/45">Заказы</span></a>
-    <a href="/favorites" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ favorites_count }}</strong><span class="text-black/45">Избранное</span></a>
-    <a href="/cart" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ cart_quantity }}</strong><span class="text-black/45">В корзине</span></a>
+    <a class="rounded-xl border border-black/10 px-2 py-3" href="/orders"><strong class="block text-lg">{{ orders_count }}</strong><span class="text-black/45">Заказы</span></a>
+    <a class="rounded-xl border border-black/10 px-2 py-3" href="/favorites"><strong class="block text-lg">{{ favorites_count }}</strong><span class="text-black/45">Избранное</span></a>
+    <a class="rounded-xl border border-black/10 px-2 py-3" href="/cart"><strong class="block text-lg">{{ cart_quantity }}</strong><span class="text-black/45">В корзине</span></a>
   </div>
   <button class="w-full rounded-xl bg-ink py-4 font-black text-white">Сохранить</button>
-  <a href="/orders" class="block w-full rounded-xl border border-black/10 py-4 text-center font-black">Мои заказы</a>
+  <a class="block w-full rounded-xl border border-black/10 py-4 text-center font-black" href="/orders">Мои заказы</a>
 </form>

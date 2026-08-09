@@ -8,7 +8,7 @@
       <p class="mb-5 text-xs font-black uppercase tracking-[.28em] text-white/55">Коллекция недели</p>
       <h1 class="text-4xl font-black leading-[.95] tracking-[-.055em] sm:text-7xl">Нужное.<br><span class="text-coral">Без лишнего.</span></h1>
       <p class="mt-6 max-w-md text-base leading-relaxed text-white/65">Оригинальные товары, живая проверка наличия и оформление прямо внутри Telegram.</p>
-      <a href="/catalog" class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink">Смотреть каталог →</a>
+      <a class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink" href="/catalog">Смотреть каталог →</a>
     </div>
     <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
   </div>
@@ -16,12 +16,12 @@
 
 <section class="mx-auto max-w-6xl px-4 pt-10">
   <form action="/catalog" class="flex gap-2 rounded-2xl bg-white p-2 shadow-soft">
-    <input name="q" aria-label="Поиск" placeholder="Что ищем?" class="min-w-0 flex-1 bg-transparent px-4 py-3 outline-none placeholder:text-black/35">
+    <input aria-label="Поиск" class="min-w-0 flex-1 bg-transparent px-4 py-3 outline-none placeholder:text-black/35" name="q" placeholder="Что ищем?">
     <button class="rounded-xl bg-ink px-5 font-bold text-white">Найти</button>
   </form>
   <div class="no-scrollbar mt-5 flex gap-2 overflow-x-auto pb-2">
     {% for category in categories %}
-    <a href="/catalog?category_id={{ category.id }}" class="whitespace-nowrap rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold">{{ category.name }}</a>
+    <a class="whitespace-nowrap rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold" href="/catalog?category_id={{ category.id }}">{{ category.name }}</a>
     {% endfor %}
   </div>
 </section>
@@ -32,7 +32,7 @@
 <section class="mx-auto max-w-6xl px-4 pt-12">
   <div class="mb-5 flex items-end justify-between">
     <h2 class="text-2xl font-black tracking-tight sm:text-3xl">{{ section_title }}</h2>
-    <a href="/catalog" class="text-sm font-bold text-black/50">Все товары →</a>
+    <a class="text-sm font-bold text-black/50" href="/catalog">Все товары →</a>
   </div>
   <div class="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-6">
     {% for product in section_products %}

@@ -1,19 +1,21 @@
 import html
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any, Optional
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.filters.command import CommandObject
-from aiogram.types import CallbackQuery, Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import CallbackQuery, Message, WebAppInfo
 from pydantic import BaseModel
-from rewire import config, logger, simple_plugin
+from rewire import config, simple_plugin
 from rewire_sqlmodel import transaction
-from sqlalchemy import func
 
+from src import bot
 from src.catalog import CatalogValidationError, sync_catalog
+from src.keyboards import inline_keyboard
 from src.models import (
     AvailabilityRequest,
     Order,
@@ -21,17 +23,21 @@ from src.models import (
     PromoCode,
     User,
 )
-from src.orders import ORDER_STATUS_LABELS, cancel_order, confirm_payment
+from src.orders import cancel_order, confirm_payment, ORDER_STATUS_LABELS
 
 
 @config
 class Config(BaseModel):
-    admin_chat_id: str = ''
+    admin_chat_id: int
+    mini_app_url: str
     products_path: str = 'assets/products.xlsx'
 
 
 plugin = simple_plugin()
 router = Router(name='admin')
+
+router.message.filter(F.chat.id == Config.admin_chat_id)
+router.callback_query.filter(F.message.chat.id == Config.admin_chat_id)
 
 
 class AdminSectionCallback(CallbackData, prefix='adm'):
@@ -66,137 +72,163 @@ AVAILABILITY_LABELS = {
 }
 
 
+def _cart_keyboard():
+    return inline_keyboard([
+        (
+            '🛒 Перейти в корзину',
+            WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/cart'),
+        ),
+    ])
+
+
 def _availability_keyboard(request_id: int):
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text='✅ Есть всё',
-        callback_data=AvailabilityActionCallback(
-            request_id=request_id,
-            status='available',
-        ),
-    )
-    builder.button(
-        text='❌ Нет',
-        callback_data=AvailabilityActionCallback(
-            request_id=request_id,
-            status='unavailable',
-        ),
-    )
-    builder.button(
-        text='⏳ Уточняется',
-        callback_data=AvailabilityActionCallback(
-            request_id=request_id,
-            status='on_request',
-        ),
-    )
-    return builder.adjust(2, 1).as_markup()
+    return inline_keyboard([
+        (
+            text,
+            AvailabilityActionCallback(
+                request_id=request_id, status=status,
+            ),
+        )
+        for text, status in (
+            ('✅ Есть всё', 'available'),
+            ('❌ Нет', 'unavailable'),
+            ('⏳ Уточняется', 'on_request'),
+        )
+    ], 2, 1)
 
 
 async def notify_availability_request(
-    bot: Bot,
     availability: AvailabilityRequest,
     product: Product,
     user: User,
 ) -> bool:
-    chat_id = admin_chat_id()
-    if chat_id is None:
-        logger.error('ADMIN_CHAT_ID is not configured; availability notification skipped')
-        return False
     username = f'@{html.escape(user.username)}' if user.username else 'без username'
-    try:
-        await bot.send_message(
-            chat_id,
-            f'<b>Новый запрос наличия №{availability.id}</b>\n\n'
-            f'Товар: <b>{html.escape(product.name)}</b>\n'
-            f'SKU: <code>{html.escape(product.sku)}</code>\n'
-            f'Нужно: <b>{availability.requested_quantity or 1} шт.</b>\n'
-            f'Покупатель: {user.id} ({username})',
-            reply_markup=_availability_keyboard(availability.id),
-        )
-    except Exception as exc:
-        logger.error('Failed to notify admin chat about availability: {}', exc)
-        return False
-    return True
+    return await bot.send_message(
+        Config.admin_chat_id,
+        f'<b>Новый запрос наличия №{availability.id}</b>\n\n'
+        f'Товар: <b>{html.escape(product.name)}</b>\n'
+        f'SKU: <code>{html.escape(product.sku)}</code>\n'
+        f'Нужно: <b>{availability.requested_quantity or 1} шт.</b>\n'
+        f'Покупатель: {user.id} ({username})',
+        reply_markup=_availability_keyboard(availability.id),
+    )
 
 
-async def notify_payment_review(bot: Bot, order: Order, user: User) -> bool:
-    chat_id = admin_chat_id()
-    if chat_id is None:
-        logger.error('ADMIN_CHAT_ID is not configured; payment notification skipped')
-        return False
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text='✅ Подтвердить оплату',
-        callback_data=OrderActionCallback(order_id=order.id, action='paid'),
-    )
-    builder.button(
-        text='✖️ Отменить заказ',
-        callback_data=OrderActionCallback(order_id=order.id, action='cancel'),
-    )
+async def notify_payment_review(order: Order, user: User) -> bool:
     username = f'@{html.escape(user.username)}' if user.username else 'без username'
+    return await bot.send_message(
+        Config.admin_chat_id,
+        f'<b>Покупатель сообщил об оплате</b>\n\n'
+        f'Заказ: <b>{html.escape(order.number)}</b>\n'
+        f'Сумма: <b>{order.paid_total} ₽</b>\n'
+        f'Покупатель: {user.id} ({username})',
+        reply_markup=inline_keyboard([
+            (
+                '✅ Подтвердить оплату',
+                OrderActionCallback(order_id=order.id, action='paid'),
+            ),
+            (
+                '✖️ Отменить заказ',
+                OrderActionCallback(order_id=order.id, action='cancel'),
+            ),
+        ]),
+    )
+
+
+ADMIN_TEXT = (
+    '<b>Администрирование Fyvessa</b>\n\n'
+    'Выберите очередь или действие. Товары редактируются в Excel, остальные '
+    'операции выполняются здесь.'
+)
+
+
+async def _edit_message(callback: CallbackQuery, text: str, reply_markup=None):
     try:
-        await bot.send_message(
-            chat_id,
-            f'<b>Покупатель сообщил об оплате</b>\n\n'
-            f'Заказ: <b>{html.escape(order.number)}</b>\n'
-            f'Сумма: <b>{order.paid_total} ₽</b>\n'
-            f'Покупатель: {user.id} ({username})',
-            reply_markup=builder.adjust(1).as_markup(),
-        )
-    except Exception as exc:
-        logger.error('Failed to notify admin chat about payment: {}', exc)
-        return False
-    return True
-
-
-def admin_chat_id() -> int | None:
-    value = Config.admin_chat_id.strip()
-    try:
-        return int(value) if value else None
-    except ValueError:
-        return None
-
-
-def _is_admin_chat(chat_id: int) -> bool:
-    configured_chat_id = admin_chat_id()
-    return configured_chat_id is not None and chat_id == configured_chat_id
-
-
-async def _deny(message: Message):
-    await message.answer('Команда доступна только в админском чате.')
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if 'message is not modified' not in str(exc):
+            raise
 
 
 def _admin_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text='📦 Запросы наличия',
-        callback_data=AdminSectionCallback(section='availability'),
-    )
-    builder.button(
-        text='💳 Заказы и оплаты',
-        callback_data=AdminSectionCallback(section='orders'),
-    )
-    builder.button(
-        text='👥 Пользователи',
-        callback_data=AdminSectionCallback(section='users'),
-    )
-    builder.button(
-        text='🎟 Промокоды',
-        callback_data=AdminSectionCallback(section='promos'),
-    )
-    builder.button(
-        text='📊 Сводка',
-        callback_data=AdminSectionCallback(section='summary'),
-    )
-    builder.button(
-        text='🔄 Синхронизировать Excel',
-        callback_data=AdminSectionCallback(section='sync'),
-    )
-    builder.button(
-        text='❓ Команды и подсказки',
-        callback_data=AdminSectionCallback(section='help'),
-    )
-    return builder.adjust(1).as_markup()
+    return inline_keyboard([
+        (text, AdminSectionCallback(section=section))
+        for text, section in (
+            ('📦 Запросы наличия', 'availability'),
+            ('💳 Заказы и оплаты', 'orders'),
+            ('👥 Пользователи', 'users'),
+            ('🎟 Промокоды', 'promos'),
+            ('📊 Сводка', 'summary'),
+            ('🔄 Синхронизировать Excel', 'sync'),
+            ('❓ Команды и подсказки', 'help'),
+        )
+    ])
+
+
+def _page_section(section: str, page: int = 0) -> str:
+    return f'{section}.{page}' if page else section
+
+
+def _parse_section(value: str) -> tuple[str, int]:
+    section, separator, page = value.rpartition('.')
+    if separator and page.isdigit():
+        return section, int(page)
+
+    return value, 0
+
+
+def _back_keyboard(section: str = 'menu', page: int = 0):
+    return inline_keyboard([
+        (
+            '← Назад',
+            AdminSectionCallback(section=_page_section(section, page)),
+        ),
+    ])
+
+
+def _admin_navigation(section: str, page: int, total: int) -> list[tuple[str, Any]]:
+    buttons = []
+    if page > 0:
+        buttons.append((
+            f'← {page}/{total}',
+            AdminSectionCallback(section=_page_section(section, page - 1)),
+        ))
+
+    if page + 1 < total:
+        buttons.append((
+            f'{page + 2}/{total} →',
+            AdminSectionCallback(section=_page_section(section, page + 1)),
+        ))
+
+    return buttons + [('⌂ Меню', AdminSectionCallback(section='menu'))]
+
+
+def _user_navigation(
+    user_id: int, section: str, page: int, total: int,
+) -> list[tuple[str, Any]]:
+    buttons = []
+    if page > 0:
+        buttons.append((
+            f'← {page}/{total}',
+            UserSectionCallback(
+                user_id=user_id, section=_page_section(section, page - 1),
+            ),
+        ))
+
+    if page + 1 < total:
+        buttons.append((
+            f'{page + 2}/{total} →',
+            UserSectionCallback(
+                user_id=user_id, section=_page_section(section, page + 1),
+            ),
+        ))
+
+    return buttons + [
+        (
+            '← Пользователь',
+            UserSectionCallback(user_id=user_id, section='card'),
+        ),
+    ]
 
 
 def _help_text() -> str:
@@ -217,214 +249,229 @@ def _help_text() -> str:
 
 @router.message(Command('admin'))
 async def admin_menu(message: Message):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
-    await message.answer(
-        '<b>Администрирование Fyvessa</b>\n\n'
-        'Выберите очередь или действие. Товары редактируются в Excel, остальные '
-        'операции выполняются здесь.',
-        reply_markup=_admin_keyboard(),
-    )
+    await message.answer(ADMIN_TEXT, reply_markup=_admin_keyboard())
 
 
-async def _run_sync(message: Message):
+async def _sync_text() -> str:
     try:
         report = await sync_catalog(Config.products_path)
     except CatalogValidationError as exc:
-        await message.answer(
-            f'❌ <b>Excel не импортирован</b>\n<pre>{html.escape(str(exc))}</pre>'
+        return (
+            '❌ <b>Excel не импортирован</b>\n'
+            f'<pre>{html.escape(str(exc))}</pre>'
         )
-        return
-    await message.answer(
+
+    return (
         '✅ <b>Каталог синхронизирован</b>\n\n'
-        f'Создано товаров: {report.created}\n'
-        f'Обновлено товаров: {report.updated}\n'
-        f'Скрыто товаров: {report.hidden}\n'
+        f'Создано товаров: {report.products_created}\n'
+        f'Обновлено товаров: {report.products_updated}\n'
+        f'Скрыто товаров: {report.products_hidden}\n'
         f'Создано категорий: {report.categories_created}'
     )
 
 
 @router.message(Command('sync_products'))
 async def sync_products_command(message: Message):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
-    await _run_sync(message)
-
-
-async def _find_user(value: str) -> User | None:
-    value = value.strip().lstrip('@')
-    if not value:
-        return None
-    if value.isdigit():
-        return await User.select().filter_by(id=int(value)).first()
-    return await (
-        User.select()
-        .where(func.lower(User.username) == value.lower())
-        .first()
-    )
+    await message.answer(await _sync_text())
 
 
 async def _user_text(user: User) -> str:
-    orders = list(await Order.select().filter_by(user_id=user.id).all())
-    requests = list(
-        await AvailabilityRequest.select().filter_by(user_id=user.id).all()
-    )
+    orders = await Order.get_recent(user_id=user.id, limit=None)
+    requests = await AvailabilityRequest.get_recent(user_id=user.id, limit=None)
     username = f'@{html.escape(user.username)}' if user.username else 'нет'
     name = html.escape(
         ' '.join(part for part in (user.first_name, user.last_name) if part)
         or 'не указано'
     )
+
     return (
         f'<b>Пользователь {user.id}</b>\n\n'
         f'Имя: {name}\n'
         f'Username: {username}\n'
         f'Telegram ID: <code>{user.id}</code>\n'
-        f'Телефон: {html.escape(user.phone_number or "не указан")}\n'
-        f'Дата рождения: {user.birth_date or "не указана"}\n'
-        f'Регистрация: {"✅ заполнена" if user.is_registered else "⚠️ не завершена"}\n'
+        f'Телефон: {html.escape(user.phone_number or 'не указан')}\n'
+        f'Дата рождения: {user.birth_date or 'не указана'}\n'
+        f'Регистрация: {'✅ заполнена' if user.is_registered else '⚠️ не завершена'}\n'
         f'Коины: {user.coin_balance}\n'
         f'Персональная скидка: {user.personal_discount_percent}%\n'
-        f'Пригласил: {user.referrer_id or "нет"}\n'
+        f'Пригласил: {user.referrer_id or 'нет'}\n'
         f'Заказов: {len(orders)}\n'
         f'Запросов наличия: {len(requests)}\n'
         f'Создан: {user.created_at:%d.%m.%Y}'
     )
 
 
-def _user_keyboard(user_id: int):
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text='📦 Заказы',
-        callback_data=UserSectionCallback(user_id=user_id, section='orders'),
-    )
-    builder.button(
-        text='🔎 Запросы наличия',
-        callback_data=UserSectionCallback(user_id=user_id, section='availability'),
-    )
-    builder.button(
-        text='🔄 Обновить карточку',
-        callback_data=UserSectionCallback(user_id=user_id, section='card'),
-    )
-    return builder.adjust(2, 1).as_markup()
+def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
+    buttons = [
+        (text, UserSectionCallback(user_id=user_id, section=section))
+        for text, section in (
+            ('📦 Заказы', 'orders'),
+            ('🔎 Запросы наличия', 'availability'),
+            ('🔄 Обновить карточку', 'card'),
+        )
+    ]
+
+    if page > 0:
+        buttons.append((
+            f'← {page}/{total}',
+            AdminSectionCallback(
+                section=_page_section('users', page - 1),
+            ),
+        ))
+
+    if page + 1 < total:
+        buttons.append((
+            f'{page + 2}/{total} →',
+            AdminSectionCallback(
+                section=_page_section('users', page + 1),
+            ),
+        ))
+
+    buttons.append(('⌂ Меню', AdminSectionCallback(section='menu')))
+    return inline_keyboard(buttons, 2, 1, 2, 1)
 
 
 @router.message(Command('user'))
 @transaction(1)
 async def user_command(message: Message, command: CommandObject):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
-    user = await _find_user(command.args or '')
+    user = await User.find(command.args or '')
     if not user:
-        await message.answer(
+        return await message.answer(
             'Пользователь не найден. Используйте <code>/user username</code> или '
             '<code>/user 123456789</code>.'
         )
-        return
+
     await message.answer(
         await _user_text(user),
         reply_markup=_user_keyboard(user.id),
     )
 
 
-async def _send_user_orders(message: Message, user: User):
-    orders = list(
-        await Order.select()
-        .filter_by(user_id=user.id)
-        .order_by(Order.created_at.desc())
-        .all()
-    )[:10]
-    if not orders:
-        await message.answer('У пользователя пока нет заказов.')
-        return
-    for order in orders:
-        builder = InlineKeyboardBuilder()
-        if order.status == 'payment_review':
-            builder.button(
-                text='✅ Подтвердить оплату',
-                callback_data=OrderActionCallback(order_id=order.id, action='paid'),
-            )
-        if order.payment_status != 'paid' and order.status != 'cancelled':
-            builder.button(
-                text='✖️ Отменить',
-                callback_data=OrderActionCallback(order_id=order.id, action='cancel'),
-            )
-        await message.answer(
-            f'<b>{html.escape(order.number)}</b> · {order.paid_total} ₽\n'
-            f'{ORDER_STATUS_LABELS.get(order.status, order.status)} · {order.created_at:%d.%m.%Y %H:%M}',
-            reply_markup=builder.adjust(1).as_markup() if list(builder.buttons) else None,
-        )
+def _order_text(order: Order, user: Optional[User] = None) -> str:
+    username = f' (@{html.escape(user.username)})' if user and user.username else ''
+    return (
+        f'<b>{html.escape(order.number)}</b> · {order.paid_total} ₽\n'
+        f'{ORDER_STATUS_LABELS.get(order.status, order.status)} · '
+        f'{order.created_at:%d.%m.%Y %H:%M}\n'
+        f'Пользователь: <code>{order.user_id}</code>{username}'
+    )
 
 
-async def _send_availability_requests(
-    message: Message,
-    user_id: int | None = None,
+def _order_keyboard(
+    order: Order, *, user_id: int = 0, page: int = 0, total: int = 1,
 ):
-    query = AvailabilityRequest.select()
-    if user_id is None:
-        query = query.filter_by(status='pending')
-    else:
-        query = query.filter_by(user_id=user_id)
-    requests = list(await query.order_by(AvailabilityRequest.created_at.desc()).all())[:15]
-    if not requests:
-        await message.answer('Запросов наличия нет.')
-        return
-    for availability in requests:
-        product = await Product.select().filter_by(id=availability.product_id).first()
-        user = await User.select().filter_by(id=availability.user_id).first()
-        builder = InlineKeyboardBuilder()
-        if availability.status == 'pending':
-            builder.button(
-                text='✅ Есть',
-                callback_data=AvailabilityActionCallback(
-                    request_id=availability.id,
-                    status='available',
+    buttons = []
+    if order.status == 'payment_review':
+        buttons.append((
+            '✅ Подтвердить оплату',
+            OrderActionCallback(
+                order_id=order.id, action='paid',
+            ),
+        ))
+
+    if order.payment_status != 'paid' and order.status != 'cancelled':
+        buttons.append((
+            '✖️ Отменить',
+            OrderActionCallback(
+                order_id=order.id, action='cancel',
+            ),
+        ))
+
+    navigation = (
+        _user_navigation(user_id, 'orders', page, total)
+        if user_id
+        else _admin_navigation('orders', page, total)
+    )
+
+    return inline_keyboard(buttons + navigation, 1, 2, 1)
+
+
+async def _availability_text(availability: AvailabilityRequest) -> str:
+    product = await Product.get_by_id(availability.product_id)
+    user = await User.get_by_id(availability.user_id)
+    if not user:
+        return f'<b>Запрос №{availability.id}</b> · пользователь удалён'
+
+    username = f'@{html.escape(user.username)}' if user.username else 'без username'
+    return (
+        f'<b>Запрос №{availability.id}</b> · '
+        f'{AVAILABILITY_LABELS.get(availability.status, availability.status)}\n'
+        f'Товар: {html.escape(product.name if product else 'удалён')}\n'
+        f'Количество: {availability.requested_quantity or 1}\n'
+        f'Пользователь: <code>{user.id}</code> ({username})'
+    )
+
+
+def _availability_admin_keyboard(
+    availability: AvailabilityRequest, *, user_id: int = 0, page: int = 0,
+    total: int = 1,
+):
+    buttons = (
+        [
+            (
+                text,
+                AvailabilityActionCallback(
+                    request_id=availability.id, status=status,
                 ),
             )
-            builder.button(
-                text='❌ Нет',
-                callback_data=AvailabilityActionCallback(
-                    request_id=availability.id,
-                    status='unavailable',
-                ),
-            )
-            builder.button(
-                text='⏳ Уточняется',
-                callback_data=AvailabilityActionCallback(
-                    request_id=availability.id,
-                    status='on_request',
-                ),
-            )
-        await message.answer(
-            f'<b>Запрос №{availability.id}</b> · '
-            f'{AVAILABILITY_LABELS.get(availability.status, availability.status)}\n'
-            f'Товар: {html.escape(product.name if product else "удалён")}\n'
-            f'Количество: {availability.requested_quantity or 1}\n'
-            f'Пользователь: {user.id} '
-            f'(@{html.escape(user.username) if user and user.username else "без username"})'
-            if user
-            else f'<b>Запрос №{availability.id}</b> · пользователь удалён',
-            reply_markup=builder.adjust(2, 1).as_markup() if list(builder.buttons) else None,
+            for text, status in (
+            ('✅ Есть', 'available'),
+            ('❌ Нет', 'unavailable'),
+            ('⏳ Уточняется', 'on_request'),
         )
+        ]
+        if availability.status == 'pending'
+        else []
+    )
+
+    navigation = (
+        _user_navigation(user_id, 'availability', page, total)
+        if user_id
+        else _admin_navigation('availability', page, total)
+    )
+
+    return inline_keyboard(buttons + navigation, 2, 1, 2, 1)
+
+
+def _promo_text(promo: PromoCode) -> str:
+    return (
+        f'<b>{html.escape(promo.code)}</b> · {html.escape(promo.partner_name)}\n'
+        f'Скидка {promo.user_discount_percent}% · '
+        f'вознаграждение {promo.partner_reward_percent}% · '
+        f'{'активен' if promo.is_active else 'отключён'}'
+    )
+
+
+def _promo_keyboard(promo: PromoCode, page: int, total: int):
+    return inline_keyboard([
+        (
+            'Выключить' if promo.is_active else 'Включить',
+            PromoToggleCallback(promo_id=promo.id),
+        ),
+        *_admin_navigation('promos', page, total),
+    ], 1, 2, 1)
 
 
 async def _resolve_availability(
     availability: AvailabilityRequest,
     status: str,
-    available_quantity: int | None,
-    comment: str | None,
+    available_quantity: Optional[int],
+    comment: Optional[str],
     admin_id: int,
-    bot: Bot,
 ) -> bool:
     if availability.status != 'pending':
         return False
+
     if status not in {'available', 'unavailable', 'on_request'}:
         raise ValueError('Неизвестный статус')
+
     if status == 'available':
         available_quantity = available_quantity or availability.requested_quantity or 1
     elif status == 'unavailable':
         available_quantity = 0
     else:
         available_quantity = None
+
     availability.status = status
     availability.available_quantity = available_quantity
     availability.admin_comment = comment
@@ -432,183 +479,187 @@ async def _resolve_availability(
     availability.resolved_at = datetime.now()
     availability.add()
 
-    user = await User.select().filter_by(id=availability.user_id).first()
-    product = await Product.select().filter_by(id=availability.product_id).first()
+    user = await User.get_by_id(availability.user_id)
+    product = await Product.get_by_id(availability.product_id)
     if user:
-        suffix = (
+        suffix_text = (
             f' Доступно: {available_quantity} шт.'
             if status == 'available' and available_quantity is not None
             else ''
         )
-        note = f'\nКомментарий: {html.escape(comment)}' if comment else ''
-        try:
-            await bot.send_message(
-                user.id,
-                f'<b>Ответ по наличию</b>\n\n'
-                f'{html.escape(product.name if product else "Товар")}: '
-                f'{AVAILABILITY_LABELS[status]}.{suffix}{note}',
-            )
-        except Exception:
-            pass
+
+        note_text = f'\nКомментарий: {html.escape(comment)}' if comment else ''
+        await bot.send_message(
+            user.id,
+            f'<b>Ответ по наличию</b>\n\n'
+            f'{html.escape(product.name if product else 'Товар')}: '
+            f'{AVAILABILITY_LABELS[status]}.{suffix_text}{note_text}',
+            reply_markup=_cart_keyboard() if status == 'available' else None,
+        )
+
     return True
 
 
 @router.callback_query(AdminSectionCallback.filter())
 @transaction(1)
-async def admin_section(
-    callback: CallbackQuery,
-    callback_data: AdminSectionCallback,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    section = callback_data.section
-    if section == 'sync':
-        await _run_sync(callback.message)
+async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCallback):
+    section, page = _parse_section(callback_data.section)
+    if section == 'menu':
+        await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
+    elif section == 'sync':
+        await _edit_message(callback, await _sync_text(), _back_keyboard())
     elif section == 'help':
-        await callback.message.answer(_help_text())
+        await _edit_message(callback, _help_text(), _back_keyboard())
     elif section == 'availability':
-        await _send_availability_requests(callback.message)
+        requests = await AvailabilityRequest.get_recent(pending_only=True)
+        if not requests:
+            return await callback.answer('Запросов наличия нет.', show_alert=True)
+        page = min(page, len(requests) - 1)
+        availability = requests[page]
+        await _edit_message(
+            callback, await _availability_text(availability),
+            _availability_admin_keyboard(
+                availability, page=page, total=len(requests),
+            ),
+        )
     elif section == 'orders':
-        users = list(await User.select().all())
-        users_by_id = {user.id: user for user in users}
-        orders = list(await Order.select().order_by(Order.created_at.desc()).all())[:15]
+        orders = await Order.get_recent()
         if not orders:
-            await callback.message.answer('Заказов пока нет.')
-        for order in orders:
-            user = users_by_id.get(order.user_id)
-            builder = InlineKeyboardBuilder()
-            if order.status == 'payment_review':
-                builder.button(
-                    text='✅ Подтвердить оплату',
-                    callback_data=OrderActionCallback(order_id=order.id, action='paid'),
-                )
-            if order.payment_status != 'paid' and order.status != 'cancelled':
-                builder.button(
-                    text='✖️ Отменить',
-                    callback_data=OrderActionCallback(order_id=order.id, action='cancel'),
-                )
-            await callback.message.answer(
-                f'<b>{html.escape(order.number)}</b> · {order.paid_total} ₽\n'
-                f'{ORDER_STATUS_LABELS.get(order.status, order.status)}\n'
-                f'Пользователь: {order.user_id}'
-                f'{f" (@{html.escape(user.username)})" if user and user.username else ""}',
-                reply_markup=builder.adjust(1).as_markup() if list(builder.buttons) else None,
-            )
+            return await callback.answer('Заказов пока нет.', show_alert=True)
+        page = min(page, len(orders) - 1)
+        order = orders[page]
+        await _edit_message(
+            callback, _order_text(order, await User.get_by_id(order.user_id)),
+            _order_keyboard(order, page=page, total=len(orders)),
+        )
     elif section == 'users':
-        users = list(
-            await User.select().order_by(User.created_at.desc()).all()
-        )[:15]
+        users = await User.get_recent()
         if not users:
-            await callback.message.answer('Пользователей пока нет.')
-        for user in users:
-            await callback.message.answer(
-                await _user_text(user),
-                reply_markup=_user_keyboard(user.id),
-            )
+            return await callback.answer('Пользователей пока нет.', show_alert=True)
+        page = min(page, len(users) - 1)
+        user = users[page]
+        await _edit_message(
+            callback, await _user_text(user),
+            _user_keyboard(user.id, page, len(users)),
+        )
     elif section == 'promos':
-        promos = list(await PromoCode.select().order_by(PromoCode.created_at.desc()).all())
+        promos = await PromoCode.get_recent()
         if not promos:
-            await callback.message.answer(
+            return await callback.answer(
                 'Промокодов нет. Создание:\n'
-                '<code>/promo CODE | Партнёр | 10 | 10</code>'
+                '/promo CODE | Партнёр | 10 | 10',
+                show_alert=True,
             )
-        for promo in promos:
-            builder = InlineKeyboardBuilder().button(
-                text='Выключить' if promo.is_active else 'Включить',
-                callback_data=PromoToggleCallback(promo_id=promo.id),
-            )
-            await callback.message.answer(
-                f'<b>{html.escape(promo.code)}</b> · {html.escape(promo.partner_name)}\n'
-                f'Скидка {promo.user_discount_percent}% · '
-                f'вознаграждение {promo.partner_reward_percent}% · '
-                f'{"активен" if promo.is_active else "отключён"}',
-                reply_markup=builder.as_markup(),
-            )
+        page = min(page, len(promos) - 1)
+        promo = promos[page]
+        await _edit_message(
+            callback, _promo_text(promo), _promo_keyboard(promo, page, len(promos)),
+        )
     elif section == 'summary':
-        products = list(await Product.select().all())
-        users = list(await User.select().all())
-        orders = list(await Order.select().all())
-        pending = list(await AvailabilityRequest.select().filter_by(status='pending').all())
+        products = await Product.get_all()
+        users = await User.get_all()
+        orders = await Order.get_all()
+        pending = await AvailabilityRequest.get_recent(
+            pending_only=True, limit=None,
+        )
         review = [order for order in orders if order.status == 'payment_review']
         paid_total = sum(
             (order.paid_total for order in orders if order.payment_status == 'paid'),
             Decimal('0'),
         )
-        await callback.message.answer(
+        await _edit_message(
+            callback,
             '<b>Текущая сводка</b>\n\n'
             f'Активных товаров: {sum(product.is_active for product in products)}\n'
             f'Пользователей: {len(users)}\n'
             f'Заказов: {len(orders)}\n'
             f'Оплат на проверке: {len(review)}\n'
             f'Запросов наличия без ответа: {len(pending)}\n'
-            f'Подтверждено оплат: {paid_total} ₽'
+            f'Подтверждено оплат: {paid_total} ₽',
+            _back_keyboard(),
         )
+    else:
+        return await callback.answer('Раздел не найден.', show_alert=True)
 
 
 @router.callback_query(UserSectionCallback.filter())
 @transaction(1)
-async def user_section(
-    callback: CallbackQuery,
-    callback_data: UserSectionCallback,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    user = await User.select().filter_by(id=callback_data.user_id).first()
+async def user_section(callback: CallbackQuery, callback_data: UserSectionCallback):
+    user = await User.get_by_id(callback_data.user_id)
     if not user:
         return await callback.answer('Пользователь не найден', show_alert=True)
-    if callback_data.section == 'orders':
-        await _send_user_orders(callback.message, user)
-    elif callback_data.section == 'availability':
-        await _send_availability_requests(callback.message, user.id)
-    else:
-        await callback.message.answer(
-            await _user_text(user),
-            reply_markup=_user_keyboard(user.id),
+
+    section, page = _parse_section(callback_data.section)
+    if section == 'orders':
+        orders = await Order.get_recent(user_id=user.id, limit=10)
+        if not orders:
+            return await callback.answer('У пользователя пока нет заказов.', show_alert=True)
+
+        page = min(page, len(orders) - 1)
+        order = orders[page]
+        await _edit_message(
+            callback, _order_text(order, user),
+            _order_keyboard(
+                order, user_id=user.id, page=page, total=len(orders),
+            ),
         )
+
+    elif section == 'availability':
+        requests = await AvailabilityRequest.get_recent(user_id=user.id)
+        if not requests:
+            return await callback.answer('Запросов наличия нет.', show_alert=True)
+
+        page = min(page, len(requests) - 1)
+        availability = requests[page]
+        await _edit_message(
+            callback, await _availability_text(availability),
+            _availability_admin_keyboard(
+                availability, user_id=user.id, page=page, total=len(requests),
+            ),
+        )
+    else:
+        await _edit_message(callback, await _user_text(user), _user_keyboard(user.id))
 
 
 @router.callback_query(AvailabilityActionCallback.filter())
 @transaction(1)
-async def availability_action(
-    callback: CallbackQuery,
-    callback_data: AvailabilityActionCallback,
-    bot: Bot,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    availability = await AvailabilityRequest.select().filter_by(
-        id=callback_data.request_id
-    ).first()
+async def availability_action(callback: CallbackQuery, callback_data: AvailabilityActionCallback):
+    availability = await AvailabilityRequest.get_by_id(callback_data.request_id)
     if not availability:
         return await callback.answer('Запрос не найден', show_alert=True)
+
     changed = await _resolve_availability(
         availability,
         callback_data.status,
         None,
         None,
-        callback.from_user.id,
-        bot,
+        callback.from_user.id
     )
-    await callback.answer('Ответ отправлен' if changed else 'Запрос уже обработан')
-    if changed:
-        await callback.message.edit_reply_markup(reply_markup=None)
+
+    if not changed:
+        return await callback.answer('Запрос уже обработан', show_alert=True)
+
+    await _edit_message(
+        callback,
+        await _availability_text(availability),
+        inline_keyboard([
+            (
+                '← К запросам',
+                AdminSectionCallback(section='availability'),
+            ),
+        ]),
+    )
+
+    await callback.answer('Ответ отправлен')
 
 
 @router.message(Command('availability'))
 @transaction(1)
-async def availability_command(
-    message: Message,
-    command: CommandObject,
-    bot: Bot,
-):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
+async def availability_command(message: Message, command: CommandObject):
     parts = (command.args or '').split(maxsplit=3)
     if len(parts) < 2 or not parts[0].isdigit():
-        await message.answer(
-            'Формат: <code>/availability ID available 3 комментарий</code>'
-        )
-        return
+        return await message.answer('Формат: <code>/availability ID available 3 комментарий</code>')
+
     quantity = None
     comment = None
     if len(parts) >= 3:
@@ -617,26 +668,26 @@ async def availability_command(
             comment = parts[3] if len(parts) == 4 else None
         else:
             comment = ' '.join(parts[2:])
-    availability = await AvailabilityRequest.select().filter_by(id=int(parts[0])).first()
+
+    availability = await AvailabilityRequest.get_by_id(int(parts[0]))
     if not availability:
-        await message.answer('Запрос не найден.')
-        return
+        return await message.answer('Запрос не найден.')
+
     try:
         changed = await _resolve_availability(
             availability,
             parts[1],
             quantity,
             comment,
-            message.from_user.id,
-            bot,
+            message.from_user.id
         )
     except ValueError as exc:
-        await message.answer(html.escape(str(exc)))
-        return
+        return await message.answer(html.escape(str(exc)))
+
     await message.answer('Ответ отправлен.' if changed else 'Запрос уже обработан.')
 
 
-async def _apply_order_action(order: Order, action: str, admin_id: int, bot: Bot) -> bool:
+async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
     if action == 'paid':
         changed = await confirm_payment(order, admin_id)
         text = f'✅ Оплата заказа <b>{html.escape(order.number)}</b> подтверждена.'
@@ -645,73 +696,78 @@ async def _apply_order_action(order: Order, action: str, admin_id: int, bot: Bot
         text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
     else:
         raise ValueError('Неизвестное действие')
+
     if changed:
-        user = await User.select().filter_by(id=order.user_id).first()
+        user = await User.get_by_id(order.user_id)
         if user:
-            try:
-                await bot.send_message(user.id, text)
-            except Exception:
-                pass
+            await bot.send_message(user.id, text)
+
     return changed
 
 
 @router.callback_query(OrderActionCallback.filter())
 @transaction(1)
-async def order_action(
-    callback: CallbackQuery,
-    callback_data: OrderActionCallback,
-    bot: Bot,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    order = await Order.select().filter_by(id=callback_data.order_id).first()
+async def order_action(callback: CallbackQuery, callback_data: OrderActionCallback):
+    order = await Order.get_by_id(callback_data.order_id)
     if not order:
         return await callback.answer('Заказ не найден', show_alert=True)
+
     try:
         changed = await _apply_order_action(
             order,
             callback_data.action,
             callback.from_user.id,
-            bot,
         )
     except ValueError as exc:
         return await callback.answer(str(exc), show_alert=True)
-    await callback.answer('Готово' if changed else 'Уже выполнено')
-    if changed:
-        await callback.message.edit_reply_markup(reply_markup=None)
+
+    if not changed:
+        return await callback.answer('Уже выполнено', show_alert=True)
+
+    user = await User.get_by_id(order.user_id)
+    orders = await Order.get_recent()
+    page = next(
+        (index for index, item in enumerate(orders) if item.id == order.id), 0,
+    )
+
+    await _edit_message(
+        callback, _order_text(order, user),
+        _order_keyboard(
+            order, page=page, total=max(len(orders), 1),
+        ),
+    )
+
+    await callback.answer('Готово')
 
 
 @router.message(Command('order'))
 @transaction(1)
-async def order_command(message: Message, command: CommandObject, bot: Bot):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
+async def order_command(message: Message, command: CommandObject):
     parts = (command.args or '').split()
     if len(parts) != 2 or not parts[0].isdigit():
         await message.answer('Формат: <code>/order ID paid</code> или <code>/order ID cancel</code>')
         return
-    order = await Order.select().filter_by(id=int(parts[0])).first()
+
+    order = await Order.get_by_id(int(parts[0]))
     if not order:
-        await message.answer('Заказ не найден.')
-        return
+        return await message.answer('Заказ не найден.')
+
     try:
-        changed = await _apply_order_action(order, parts[1], message.from_user.id, bot)
+        changed = await _apply_order_action(order, parts[1], message.from_user.id)
     except ValueError as exc:
-        await message.answer(html.escape(str(exc)))
-        return
+        return await message.answer(html.escape(str(exc)))
+
     await message.answer('Готово.' if changed else 'Это действие уже выполнено.')
 
 
 @router.message(Command('discount'))
 @transaction(1)
 async def discount_command(message: Message, command: CommandObject):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
     parts = (command.args or '').rsplit(maxsplit=1)
     if len(parts) != 2:
-        await message.answer('Формат: <code>/discount username 5</code>')
-        return
-    user = await _find_user(parts[0])
+        return await message.answer('Формат: <code>/discount username 5</code>')
+
+    user = await User.find(parts[0])
     try:
         percent = Decimal(parts[1].replace(',', '.'))
     except InvalidOperation:
@@ -719,82 +775,78 @@ async def discount_command(message: Message, command: CommandObject):
     if not user or not Decimal('0') <= percent <= Decimal('100'):
         await message.answer('Пользователь не найден или процент вне диапазона 0–100.')
         return
+
     user.personal_discount_percent = percent
     user.updated_at = datetime.now()
     user.add()
-    await message.answer(
-        f'Персональная скидка пользователя {user.id}: {percent}%.'
-    )
+
+    await message.answer(f'Персональная скидка пользователя {user.id}: {percent}%.')
 
 
 @router.message(Command('promo'))
 @transaction(1)
 async def promo_command(message: Message, command: CommandObject):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
     parts = [part.strip() for part in (command.args or '').split('|')]
     if len(parts) != 4:
-        await message.answer(
-            'Формат: <code>/promo CODE | Имя партнёра | 10 | 10</code>'
-        )
-        return
+        return await message.answer('Формат: <code>/promo CODE | Имя партнёра | 10 | 10</code>')
+
     try:
         user_percent = Decimal(parts[2].replace(',', '.'))
         partner_percent = Decimal(parts[3].replace(',', '.'))
     except InvalidOperation:
-        await message.answer('Проценты должны быть числами.')
-        return
+        return await message.answer('Проценты должны быть числами.')
+
     if not all((parts[0], parts[1])) or not all(
         Decimal('0') <= value <= Decimal('100')
         for value in (user_percent, partner_percent)
     ):
-        await message.answer('Проверьте код, имя и диапазон процентов 0–100.')
-        return
+        return await message.answer('Проверьте код, имя и диапазон процентов 0–100.')
+
     code = parts[0].upper()
-    promo = await PromoCode.select().where(func.upper(PromoCode.code) == code).first()
+    promo = await PromoCode.get_by_code(code)
     if not promo:
         promo = PromoCode(code=code, partner_name=parts[1]).add()
+
     promo.partner_name = parts[1]
     promo.user_discount_percent = user_percent
     promo.partner_reward_percent = partner_percent
     promo.is_active = True
     promo.add()
+
     await message.answer(f'Промокод <b>{html.escape(code)}</b> сохранён и активен.')
-
-
-async def _toggle_promo(promo: PromoCode):
-    promo.is_active = not promo.is_active
-    promo.add()
 
 
 @router.message(Command('promo_toggle'))
 @transaction(1)
 async def promo_toggle_command(message: Message, command: CommandObject):
-    if not _is_admin_chat(message.chat.id):
-        return await _deny(message)
     code = (command.args or '').strip().upper()
-    promo = await PromoCode.select().where(func.upper(PromoCode.code) == code).first()
+    promo = await PromoCode.get_by_code(code)
     if not promo:
-        await message.answer('Промокод не найден.')
-        return
-    await _toggle_promo(promo)
-    await message.answer(f'{promo.code}: {"включён" if promo.is_active else "отключён"}.')
+        return await message.answer('Промокод не найден.')
+
+    promo.toggle()
+    await message.answer(f'{promo.code}: {'включён' if promo.is_active else 'отключён'}.')
 
 
 @router.callback_query(PromoToggleCallback.filter())
 @transaction(1)
-async def promo_toggle_callback(
-    callback: CallbackQuery,
-    callback_data: PromoToggleCallback,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    promo = await PromoCode.select().filter_by(id=callback_data.promo_id).first()
+async def promo_toggle_callback(callback: CallbackQuery, callback_data: PromoToggleCallback):
+    promo = await PromoCode.get_by_id(callback_data.promo_id)
     if not promo:
         return await callback.answer('Промокод не найден', show_alert=True)
-    await _toggle_promo(promo)
+
+    promo.toggle()
+    promos = await PromoCode.get_recent()
+    page = next(
+        (index for index, item in enumerate(promos) if item.id == promo.id), 0,
+    )
+
+    await _edit_message(
+        callback, _promo_text(promo),
+        _promo_keyboard(promo, page, max(len(promos), 1)),
+    )
+
     await callback.answer('Включён' if promo.is_active else 'Отключён')
-    await callback.message.edit_reply_markup(reply_markup=None)
 
 
 @plugin.setup()

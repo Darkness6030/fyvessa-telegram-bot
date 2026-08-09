@@ -1,11 +1,10 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 from uuid import uuid4
 
 from fastapi import HTTPException
 from rewire_sqlmodel import session_context
-from sqlalchemy import func
-from sqlmodel import col
 
 from src.models import (
     AvailabilityRequest,
@@ -18,8 +17,7 @@ from src.models import (
     PromoCode,
     User,
 )
-from src.pricing import PricingLine, calculate_pricing, money
-
+from src.pricing import calculate_pricing, money, PricingLine
 
 ORDER_STATUS_LABELS = {
     'awaiting_payment': 'Ожидает оплаты',
@@ -29,36 +27,18 @@ ORDER_STATUS_LABELS = {
     'cancelled': 'Отменён',
 }
 
-async def find_active_promo(code: str) -> PromoCode | None:
-    normalized = code.strip().upper()
-    if not normalized:
-        return None
-    return await (
-        PromoCode.select()
-        .where(func.upper(PromoCode.code) == normalized)
-        .where(col(PromoCode.is_active).is_(True))
-        .first()
-    )
 
-
-async def confirmed_cart_availability(
-    user: User,
-    items: list[CartItem] | None = None,
-) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
-    cart_items = items or list(await CartItem.select().filter_by(user_id=user.id).all())
+async def confirmed_cart_availability(user: User, items: Optional[list[CartItem]] = None) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
+    cart_items = items or await CartItem.get_for_user(user.id)
     if not cart_items:
         return {}, []
+
     product_ids = [item.product_id for item in cart_items]
-    requests = list(
-        await AvailabilityRequest.select()
-        .where(AvailabilityRequest.user_id == user.id)
-        .where(col(AvailabilityRequest.product_id).in_(product_ids))
-        .order_by(AvailabilityRequest.created_at.desc(), AvailabilityRequest.id.desc())
-        .all()
-    )
+    requests = await AvailabilityRequest.get_latest_for_products(user.id, product_ids)
     latest_by_product: dict[int, AvailabilityRequest] = {}
     for availability in requests:
         latest_by_product.setdefault(availability.product_id, availability)
+
     confirmed: dict[int, AvailabilityRequest] = {}
     missing: list[CartItem] = []
     for item in cart_items:
@@ -72,6 +52,7 @@ async def confirmed_cart_availability(
             confirmed[item.product_id] = availability
         else:
             missing.append(item)
+
     return confirmed, missing
 
 
@@ -87,7 +68,7 @@ async def create_order_from_cart(
             detail='Заполните имя, фамилию, дату рождения и телефон в профиле',
         )
 
-    items = list(await CartItem.select().filter_by(user_id=user.id).all())
+    items = await CartItem.get_for_user(user.id)
     if not items:
         raise HTTPException(status_code=409, detail='Корзина пуста')
 
@@ -98,12 +79,11 @@ async def create_order_from_cart(
             detail='Сначала подтвердите наличие нужного количества всех товаров в корзине',
         )
 
-    products = list(
-        await Product.select()
-        .where(col(Product.id).in_([item.product_id for item in items]))
-        .where(col(Product.is_active).is_(True))
-        .all()
+    products = await Product.get_by_ids(
+        [item.product_id for item in items],
+        active_only=True,
     )
+
     products_by_id = {product.id: product for product in products}
     if len(products_by_id) != len({item.product_id for item in items}):
         raise HTTPException(
@@ -117,16 +97,19 @@ async def create_order_from_cart(
     promo = None
     personal_percent = Decimal('0')
     promo_percent = Decimal('0')
+
     if discount_mode == 'personal':
         personal_percent = user.personal_discount_percent
     elif discount_mode == 'promo':
-        promo = await find_active_promo(promo_code)
+        promo = await PromoCode.get_by_code(promo_code, active_only=True)
         if not promo:
             raise HTTPException(status_code=422, detail='Промокод не найден или отключён')
+
         promo_percent = promo.user_discount_percent
 
     if coins_requested < 0:
         raise HTTPException(status_code=422, detail='Количество коинов не может быть отрицательным')
+
     if coins_requested > user.coin_balance:
         raise HTTPException(status_code=422, detail='Недостаточно коинов')
 
@@ -142,8 +125,8 @@ async def create_order_from_cart(
             )
             for item in items
         ],
-        personal_discount_percent=personal_percent,
-        promo_discount_percent=promo_percent,
+        personal_percent=personal_percent,
+        promo_percent=promo_percent,
         coins_requested=coins_requested,
     )
 
@@ -165,7 +148,7 @@ async def create_order_from_cart(
     ).add()
     await session_context.get().flush()
 
-    categories = list(await Category.select().all())
+    categories = await Category.get_all()
     category_names = {category.id: category.name for category in categories}
     for item in items:
         product = products_by_id[item.product_id]
@@ -197,17 +180,21 @@ async def create_order_from_cart(
 
     for item in items:
         await item.delete()
+
     for availability in confirmations.values():
         availability.status = 'used'
         availability.add()
+
     return order
 
 
 async def report_payment(order: Order) -> bool:
     if order.status == 'payment_review':
         return False
+
     if order.status != 'awaiting_payment':
         raise HTTPException(status_code=409, detail='Статус этого заказа уже изменён')
+
     order.status = 'payment_review'
     order.payment_status = 'review'
     order.payment_reported_at = datetime.now()
@@ -221,7 +208,7 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     if order.status != 'payment_review':
         raise ValueError('Сначала пользователь должен сообщить об оплате')
 
-    items = list(await OrderItem.select().filter_by(order_id=order.id).all())
+    items = await OrderItem.get_for_order(order.id)
     pricing = calculate_pricing(
         [
             PricingLine(
@@ -234,10 +221,11 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
             )
             for item in items
         ],
-        personal_discount_percent=order.personal_discount_percent,
-        promo_discount_percent=order.promo_discount_percent,
+        personal_percent=order.personal_discount_percent,
+        promo_percent=order.promo_discount_percent,
         coins_requested=order.coins_used,
     )
+
     order.product_discount_total = pricing.product_discount
     order.subtotal = pricing.retail_subtotal
     order.paid_total = pricing.paid_total
@@ -247,7 +235,7 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     order.bulat_share = pricing.bulat_share
     order.partner_reward = Decimal('0')
     if order.promo_code_id:
-        promo = await PromoCode.select().filter_by(id=order.promo_code_id).first()
+        promo = await PromoCode.get_by_id(order.promo_code_id)
         if promo:
             order.partner_reward = money(
                 order.paid_total * promo.partner_reward_percent / Decimal('100')
@@ -258,22 +246,25 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     order.paid_at = datetime.now()
     order.paid_by_admin_id = admin_id
     order.add()
+
     for item in items:
-        product = await Product.select().filter_by(id=item.product_id).first()
+        product = await Product.get_by_id(item.product_id)
         if product:
             product.purchases_count += item.quantity
             product.add()
+
     return True
 
 
 async def cancel_order(order: Order, admin_id: int) -> bool:
     if order.status == 'cancelled':
         return False
+
     if order.payment_status == 'paid':
         raise ValueError('Оплаченный заказ нельзя отменить этой командой')
 
     if order.coins_used:
-        user = await User.select().filter_by(id=order.user_id).first()
+        user = await User.get_by_id(order.user_id)
         if user:
             user.coin_balance = money(user.coin_balance + order.coins_used)
             user.updated_at = datetime.now()
