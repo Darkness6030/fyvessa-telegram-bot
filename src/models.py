@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional, Self
 
 from rewire import simple_plugin
-from rewire_sqlmodel import SQLModel
+from rewire_sqlmodel import SQLModel, session_context
 from sqlalchemy import BigInteger, Text
 from sqlmodel import Field
 
@@ -43,7 +43,7 @@ class Product(SQLModel, table=True):
 
     @property
     def current_price(self) -> Decimal:
-        return self.discount_price if self.discount_price is not None else self.retail_price
+        return self.discount_price or self.retail_price
 
 
 class Customer(SQLModel, table=True):
@@ -76,13 +76,15 @@ class Customer(SQLModel, table=True):
     ) -> Self:
         customer = await cls.select().filter_by(user_id=user_id).first()
         if not customer:
-            return cls(
+            customer = cls(
                 user_id=user_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
                 referral_code=f'FY{user_id:X}',
             ).add()
+            await session_context.get().flush()
+            return customer
 
         customer.username = username
         customer.updated_at = datetime.now()

@@ -3,7 +3,7 @@ import asyncio
 from rewire import DependenciesModule, LifecycleModule, LoaderModule, Space
 
 
-async def main() -> None:
+async def main():
     async with Space().init().use():
         import rewire_fastapi
         import rewire_sqlmodel.ext.fastapi
@@ -14,8 +14,9 @@ async def main() -> None:
             rewire_fastapi.plugin,
             rewire_sqlmodel.ext.fastapi.plugin,
         ).solve()
+
         await LifecycleModule.get().start()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())

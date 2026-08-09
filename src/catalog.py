@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Optional
@@ -150,7 +150,7 @@ def load_catalog_rows(path: str | Path) -> list[CatalogRow]:
 async def sync_catalog(path: str | Path) -> SyncReport:
     rows = load_catalog_rows(path)
     session = session_context.get()
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
 
     categories = {category.name.casefold(): category for category in await Category.select().all()}
     products = {product.sku.casefold(): product for product in await Product.select().all()}
@@ -160,7 +160,7 @@ async def sync_catalog(path: str | Path) -> SyncReport:
     for row in rows:
         category_key = row.category.casefold()
         category = categories.get(category_key)
-        if category is None:
+        if not category:
             category = Category(name=row.category, image_url=row.category_image_url).add()
             await session.flush()
             categories[category_key] = category
@@ -182,7 +182,7 @@ async def sync_catalog(path: str | Path) -> SyncReport:
         values["category_id"] = category.id
         values["updated_at"] = now
 
-        if product is None:
+        if not product:
             Product(**values).add()
             created += 1
         else:

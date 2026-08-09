@@ -67,7 +67,7 @@
 ## Этап 6 — production
 
 - [ ] Alembic baseline и проверка миграций PostgreSQL.
-- [ ] Docker image и compose для приложения + PostgreSQL.
+- [x] Docker image и compose для приложения + PostgreSQL.
 - [ ] Webhook deployment либо документированный polling deployment.
 - [ ] HTTPS, health/readiness, backup БД и мониторинг ошибок.
 - [ ] Ограничения частоты, аудит чувствительных действий и тест восстановления.
