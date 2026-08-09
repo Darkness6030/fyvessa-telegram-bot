@@ -8,10 +8,12 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.filters.command import CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, WebAppInfo
 from pydantic import BaseModel
 from rewire import config, simple_plugin
-from rewire_sqlmodel import transaction
+from rewire_sqlmodel import session_context, transaction
 
 from src import bot
 from src.catalog import CatalogValidationError, sync_catalog
@@ -61,6 +63,16 @@ class UserSectionCallback(CallbackData, prefix='usr'):
 
 class PromocodeToggleCallback(CallbackData, prefix='promo'):
     promocode_id: int
+
+
+class PromocodeActionCallback(CallbackData, prefix='pma'):
+    action: str
+    promocode_id: int = 0
+    page: int = 0
+
+
+class PromocodeForm(StatesGroup):
+    details = State()
 
 
 AVAILABILITY_LABELS = {
@@ -285,7 +297,8 @@ def _help_text() -> str:
 
 
 @router.message(Command('admin'))
-async def admin_menu(message: Message):
+async def admin_menu(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(ADMIN_TEXT, reply_markup=_admin_keyboard())
 
 
@@ -476,12 +489,14 @@ def _availability_admin_keyboard(
     return inline_keyboard(buttons + navigation, 2, 1, 2, 1)
 
 
-def _promocode_text(promocode: Promocode) -> str:
+async def _promocode_text(promocode: Promocode) -> str:
+    usage_count = await Order.count_for_promocode(promocode.id)
     return (
         f'<b>{html.escape(promocode.code)}</b> · {html.escape(promocode.partner_name)}\n'
         f'Скидка {promocode.user_discount_percent}% · '
         f'вознаграждение {promocode.partner_reward_percent}% · '
-        f'{'активен' if promocode.is_active else 'отключён'}'
+        f'{'активен' if promocode.is_active else 'отключён'}\n'
+        f'Использований: <b>{usage_count}</b>'
     )
 
 
@@ -491,8 +506,97 @@ def _promocode_keyboard(promocode: Promocode, page: int, total: int):
             'Выключить' if promocode.is_active else 'Включить',
             PromocodeToggleCallback(promocode_id=promocode.id),
         ),
+        (
+            '➕ Добавить',
+            PromocodeActionCallback(
+                action='create', promocode_id=promocode.id, page=page,
+            ),
+        ),
+        (
+            '🗑 Удалить',
+            PromocodeActionCallback(
+                action='delete', promocode_id=promocode.id, page=page,
+            ),
+        ),
         *_admin_navigation('promos', page, total),
-    ], 1, 2, 1)
+    ], 1, 2, 2, 1)
+
+
+def _promocode_form_keyboard(promocode_id: int = 0, page: int = 0):
+    return inline_keyboard([
+        (
+            '← Отмена',
+            PromocodeActionCallback(
+                action='list', promocode_id=promocode_id, page=page,
+            ),
+        ),
+        ('⌂ Меню', AdminSectionCallback(section='menu')),
+    ])
+
+
+def _empty_promocodes_keyboard():
+    return inline_keyboard([
+        ('➕ Добавить промокод', PromocodeActionCallback(action='create')),
+        ('⌂ Меню', AdminSectionCallback(section='menu')),
+    ])
+
+
+async def _show_promocodes(callback: CallbackQuery, page: int = 0):
+    promocodes = await Promocode.get_recent()
+    if not promocodes:
+        await _edit_message(
+            callback,
+            '<b>Промокоды</b>\n\nПромокодов пока нет.',
+            _empty_promocodes_keyboard(),
+        )
+        return
+
+    page = min(page, len(promocodes) - 1)
+    promocode = promocodes[page]
+    await _edit_message(
+        callback, await _promocode_text(promocode),
+        _promocode_keyboard(promocode, page, len(promocodes)),
+    )
+
+
+def _parse_promocode_details(value: str) -> tuple[str, str, Decimal, Decimal]:
+    parts = [part.strip() for part in value.split('|')]
+    if len(parts) != 4:
+        raise ValueError(
+            'Формат: CODE | Имя партнёра | Процент скидки | '
+            'Процент вознаграждения'
+        )
+
+    try:
+        user_percent = Decimal(parts[2].replace(',', '.'))
+        partner_percent = Decimal(parts[3].replace(',', '.'))
+    except InvalidOperation as exc:
+        raise ValueError('Проценты должны быть числами') from exc
+
+    if not all((parts[0], parts[1])):
+        raise ValueError('Код и имя партнёра не могут быть пустыми')
+    if not all(
+        Decimal('0') <= percent <= Decimal('100')
+        for percent in (user_percent, partner_percent)
+    ):
+        raise ValueError('Проценты должны быть в диапазоне 0–100')
+
+    return parts[0].upper(), parts[1], user_percent, partner_percent
+
+
+async def _save_promocode(value: str) -> Promocode:
+    code, partner_name, user_percent, partner_percent = _parse_promocode_details(value)
+    promocode = await Promocode.get_by_code(code)
+    if not promocode:
+        promocode = Promocode(code=code, partner_name=partner_name)
+
+    promocode.partner_name = partner_name
+    promocode.user_discount_percent = user_percent
+    promocode.partner_reward_percent = partner_percent
+    promocode.is_active = True
+    promocode.add()
+    await session_context.get().flush()
+    return promocode
 
 
 async def _resolve_availability(
@@ -549,7 +653,11 @@ async def _resolve_availability(
 
 @router.callback_query(AdminSectionCallback.filter())
 @transaction(1)
-async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCallback):
+async def admin_section(
+    callback: CallbackQuery, callback_data: AdminSectionCallback,
+    state: FSMContext,
+):
+    await state.clear()
     section, page = _parse_section(callback_data.section)
     if section == 'menu':
         await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
@@ -590,20 +698,7 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
             _user_keyboard(user.id, page, len(users)),
         )
     elif section == 'promos':
-        promocodes = await Promocode.get_recent()
-        if not promocodes:
-            return await callback.answer(
-                'Промокодов нет. Создание:\n'
-                '/promo CODE | Партнёр | Процент скидки | Процент вознаграждения',
-                show_alert=True,
-            )
-
-        page = min(page, len(promocodes) - 1)
-        promocode = promocodes[page]
-        await _edit_message(
-            callback, _promocode_text(promocode),
-            _promocode_keyboard(promocode, page, len(promocodes)),
-        )
+        await _show_promocodes(callback, page)
 
     elif section == 'summary':
         products = await Product.get_all()
@@ -866,48 +961,20 @@ async def discount_command(message: Message, command: CommandObject):
 
 @router.message(Command('promo'))
 @transaction(1)
-async def promocode_command(message: Message, command: CommandObject):
-    parts = [part.strip() for part in (command.args or '').split('|')]
-    if len(parts) != 4:
-        return await _answer_with_navigation(
-            message,
-            'Формат: <code>/promo CODE | Имя партнёра | Процент скидки | '
-            'Процент вознаграждения</code>',
-            'promos',
-        )
-
+async def promocode_command(
+    message: Message, command: CommandObject, state: FSMContext,
+):
+    await state.clear()
     try:
-        user_percent = Decimal(parts[2].replace(',', '.'))
-        partner_percent = Decimal(parts[3].replace(',', '.'))
-    except InvalidOperation:
+        promocode = await _save_promocode(command.args or '')
+    except ValueError as exc:
         return await _answer_with_navigation(
-            message, 'Проценты должны быть числами.', 'promos',
+            message, html.escape(str(exc)), 'promos',
         )
-
-    if not all((parts[0], parts[1])) or not all(
-        Decimal('0') <= value <= Decimal('100')
-        for value in (user_percent, partner_percent)
-    ):
-        return await _answer_with_navigation(
-            message,
-            'Проверьте код, имя и диапазон процентов 0–100.',
-            'promos',
-        )
-
-    code = parts[0].upper()
-    promocode = await Promocode.get_by_code(code)
-    if not promocode:
-        promocode = Promocode(code=code, partner_name=parts[1])
-
-    promocode.partner_name = parts[1]
-    promocode.user_discount_percent = user_percent
-    promocode.partner_reward_percent = partner_percent
-    promocode.is_active = True
-    promocode.add()
 
     await _answer_with_navigation(
         message,
-        f'Промокод <b>{html.escape(code)}</b> сохранён и активен.',
+        f'Промокод <b>{html.escape(promocode.code)}</b> сохранён и активен.',
         'promos',
     )
 
@@ -930,13 +997,134 @@ async def promocode_toggle_command(message: Message, command: CommandObject):
     )
 
 
+async def _edit_promocode_prompt(
+    message: Message, message_id: int, text: str, reply_markup,
+):
+    try:
+        await bot.get_bot().edit_message_text(
+            chat_id=message.chat.id, message_id=message_id,
+            text=text, reply_markup=reply_markup,
+        )
+    except TelegramBadRequest as exc:
+        if 'message is not modified' not in str(exc):
+            await message.answer(text, reply_markup=reply_markup)
+
+
+@router.message(PromocodeForm.details)
+@transaction(1)
+async def promocode_form(message: Message, state: FSMContext):
+    data = await state.get_data()
+    message_id = data.get('message_id')
+    promocode_id = data.get('promocode_id', 0)
+    page = data.get('page', 0)
+    try:
+        promocode = await _save_promocode(message.text or '')
+    except ValueError as exc:
+        text = (
+            f'❌ {html.escape(str(exc))}.\n\n'
+            'Отправьте данные ещё раз одним сообщением:\n'
+            '<code>CODE | Имя партнёра | 10 | 10</code>'
+        )
+        if message_id:
+            return await _edit_promocode_prompt(
+                message, message_id, text,
+                _promocode_form_keyboard(promocode_id, page),
+            )
+
+        return await message.answer(
+            text, reply_markup=_promocode_form_keyboard(promocode_id, page),
+        )
+
+    await state.clear()
+    promocodes = await Promocode.get_recent()
+    page = next(
+        (index for index, item in enumerate(promocodes) if item.id == promocode.id),
+        0,
+    )
+    text = await _promocode_text(promocode)
+    reply_markup = _promocode_keyboard(promocode, page, len(promocodes))
+    if message_id:
+        return await _edit_promocode_prompt(
+            message, message_id, text, reply_markup,
+        )
+
+    await message.answer(text, reply_markup=reply_markup)
+
+
+@router.callback_query(PromocodeActionCallback.filter())
+@transaction(1)
+async def promocode_action(
+    callback: CallbackQuery, callback_data: PromocodeActionCallback,
+    state: FSMContext,
+):
+    if callback_data.action == 'create':
+        await state.set_state(PromocodeForm.details)
+        await state.update_data(
+            message_id=callback.message.message_id,
+            promocode_id=callback_data.promocode_id,
+            page=callback_data.page,
+        )
+        return await _edit_message(
+            callback,
+            '<b>Новый промокод</b>\n\n'
+            'Отправьте одним сообщением:\n'
+            '<code>CODE | Имя партнёра | 10 | 10</code>\n\n'
+            'Первое число — скидка покупателя, второе — вознаграждение партнёра.',
+            _promocode_form_keyboard(
+                callback_data.promocode_id, callback_data.page,
+            ),
+        )
+
+    await state.clear()
+    if callback_data.action == 'list':
+        return await _show_promocodes(callback, callback_data.page)
+
+    promocode = await Promocode.get_by_id(callback_data.promocode_id)
+    if not promocode or promocode.is_deleted:
+        return await callback.answer('Промокод не найден', show_alert=True)
+
+    if callback_data.action == 'delete':
+        usage_count = await Order.count_for_promocode(promocode.id)
+        return await _edit_message(
+            callback,
+            f'<b>Удалить промокод {html.escape(promocode.code)}?</b>\n\n'
+            f'Использований: {usage_count}. История прежних заказов сохранится.',
+            inline_keyboard([
+                (
+                    '🗑 Да, удалить',
+                    PromocodeActionCallback(
+                        action='confirm_delete',
+                        promocode_id=promocode.id,
+                        page=callback_data.page,
+                    ),
+                ),
+                (
+                    '← Отмена',
+                    PromocodeActionCallback(
+                        action='list',
+                        promocode_id=promocode.id,
+                        page=callback_data.page,
+                    ),
+                ),
+                ('⌂ Меню', AdminSectionCallback(section='menu')),
+            ]),
+        )
+
+    if callback_data.action == 'confirm_delete':
+        promocode.mark_deleted()
+        await _show_promocodes(callback, callback_data.page)
+        return await callback.answer('Промокод удалён')
+
+    return await callback.answer('Действие не найдено', show_alert=True)
+
+
 @router.callback_query(PromocodeToggleCallback.filter())
 @transaction(1)
 async def promocode_toggle_callback(
     callback: CallbackQuery, callback_data: PromocodeToggleCallback,
 ):
     promocode = await Promocode.get_by_id(callback_data.promocode_id)
-    if not promocode:
+    if not promocode or promocode.is_deleted:
         return await callback.answer('Промокод не найден', show_alert=True)
 
     promocode.toggle()
@@ -950,7 +1138,7 @@ async def promocode_toggle_callback(
     )
 
     await _edit_message(
-        callback, _promocode_text(promocode),
+        callback, await _promocode_text(promocode),
         _promocode_keyboard(promocode, page, max(len(promocodes), 1)),
     )
 

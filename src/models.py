@@ -3,9 +3,9 @@ from decimal import Decimal
 from typing import Optional, Self, Sequence
 
 from rewire import simple_plugin
-from rewire_sqlmodel import SQLModel
+from rewire_sqlmodel import session_context, SQLModel
 from sqlalchemy import BigInteger, func, Text
-from sqlmodel import col, Field
+from sqlmodel import col, Field, select
 
 plugin = simple_plugin()
 
@@ -297,9 +297,15 @@ class Promocode(SQLModel, table=True):
     user_discount_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
     partner_reward_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
     is_active: bool = Field(default=True, index=True)
+    is_deleted: bool = Field(default=False, index=True)
 
     def toggle(self) -> Self:
         self.is_active = not self.is_active
+        return self.add()
+
+    def mark_deleted(self) -> Self:
+        self.is_active = False
+        self.is_deleted = True
         return self.add()
 
     @classmethod
@@ -308,7 +314,11 @@ class Promocode(SQLModel, table=True):
 
     @classmethod
     async def get_by_code(cls, code: str, active_only: bool = False) -> Optional[Self]:
-        query = cls.select().where(func.upper(cls.code) == code.strip().upper())
+        query = (
+            cls.select()
+            .where(func.upper(cls.code) == code.strip().upper())
+            .where(col(cls.is_deleted).is_(False))
+        )
         if active_only:
             query = query.where(col(cls.is_active).is_(True))
 
@@ -316,7 +326,13 @@ class Promocode(SQLModel, table=True):
 
     @classmethod
     async def get_recent(cls, limit: int = 15) -> list[Self]:
-        return list(await cls.select().order_by(cls.created_at.desc()).limit(limit).all())
+        return list(
+            await cls.select()
+            .where(col(cls.is_deleted).is_(False))
+            .order_by(cls.created_at.desc())
+            .limit(limit)
+            .all()
+        )
 
 
 class Order(SQLModel, table=True):
@@ -367,6 +383,15 @@ class Order(SQLModel, table=True):
     @classmethod
     async def get_all(cls) -> list[Self]:
         return list(await cls.select().all())
+
+    @classmethod
+    async def count_for_promocode(cls, promocode_id: int) -> int:
+        query = (
+            select(func.count(cls.id))
+            .where(cls.promo_code_id == promocode_id)
+            .where(cls.status != 'cancelled')
+        )
+        return (await session_context.get().execute(query)).scalar_one()
 
 
 class OrderItem(SQLModel, table=True):
