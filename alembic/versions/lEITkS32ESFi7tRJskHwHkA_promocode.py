@@ -1,4 +1,5 @@
 from alembic import op
+from sqlalchemy import false
 from sqlalchemy.sql.schema import Column, ForeignKeyConstraint, Index, MetaData, PrimaryKeyConstraint, Table
 from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Date, DateTime, Integer, Numeric, Text
 from sqlmodel.sql.sqltypes import AutoString
@@ -18,6 +19,7 @@ def upgrade() -> None:
                 'is_deleted',
                 Boolean(),
                 nullable=False,
+                server_default=false()
             ),
         )
         batch_op.create_index(
