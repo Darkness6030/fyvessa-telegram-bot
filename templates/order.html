@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Заказ — Fyvessa{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-3xl px-4 pt-8">
+  <a href="/orders" class="text-sm font-bold text-black/50">← Все заказы</a>
+  <div data-auth-fragment="/api/orders/{{ order_id }}" class="mt-5">
+    <div class="rounded-[2rem] bg-white p-10 text-center text-black/45 shadow-soft">Загружаем заказ…</div>
+  </div>
+</section>
+{% endblock %}

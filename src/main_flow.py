@@ -1,5 +1,6 @@
 from aiogram import Dispatcher, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.filters.command import CommandObject
 from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from rewire import config, simple_plugin
 from rewire_sqlmodel import transaction
 
-from src.models import Customer
+from src.models import User
 
 
 @config
@@ -38,13 +39,18 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
 
 @router.message(CommandStart())
 @transaction(1)
-async def start(message: Message):
-    await Customer.get_or_create(
-        user_id=message.from_user.id,
+async def start(message: Message, command: CommandObject):
+    user = await User.get_or_create(
+        id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
     )
+    if not user.referrer_id and (command.args or '').isdigit():
+        referrer_id = int(command.args)
+        if referrer_id != user.id and await User.select().filter_by(id=referrer_id).first():
+            user.referrer_id = referrer_id
+            user.add()
 
     await message.answer(
         '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'

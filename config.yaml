@@ -21,7 +21,7 @@ rewire_fastapi:
     title: "Fyvessa Telegram Store"
     version: "1.0.0"
   uvicorn:
-    port: 8888
+    port: 8080
     host: "0.0.0.0"
   patch:
     swagger_hierarchical_tags: true

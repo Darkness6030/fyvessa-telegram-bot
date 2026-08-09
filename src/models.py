@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional, Self
 
 from rewire import simple_plugin
-from rewire_sqlmodel import SQLModel, session_context
+from rewire_sqlmodel import SQLModel
 from sqlalchemy import BigInteger, Text
 from sqlmodel import Field
 
@@ -46,21 +46,26 @@ class Product(SQLModel, table=True):
         return self.discount_price or self.retail_price
 
 
-class Customer(SQLModel, table=True):
-    id: int = Field(primary_key=True)
+class User(SQLModel, table=True):
+    id: int = Field(sa_type=BigInteger, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
-    user_id: int = Field(sa_type=BigInteger, index=True)
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     birth_date: Optional[date] = None
     phone_number: Optional[str] = None
+    referrer_id: Optional[int] = Field(
+        default=None,
+        sa_type=BigInteger,
+        foreign_key='user.id',
+        index=True,
+        ondelete='SET NULL',
+    )
 
     coin_balance: Decimal = Field(default=Decimal(0), decimal_places=2)
     personal_discount_percent: Decimal = Field(default=Decimal(0), decimal_places=2)
-    referral_code: Optional[str] = Field(default=None, index=True)
 
     @property
     def is_registered(self) -> bool:
@@ -69,39 +74,40 @@ class Customer(SQLModel, table=True):
     @classmethod
     async def get_or_create(
         cls,
-        user_id: int,
+        id: int,
         username: Optional[str],
         first_name: Optional[str],
         last_name: Optional[str],
     ) -> Self:
-        customer = await cls.select().filter_by(user_id=user_id).first()
-        if not customer:
-            customer = cls(
-                user_id=user_id,
+        user = await cls.select().filter_by(id=id).first()
+        if not user:
+            return cls(
+                id=id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                referral_code=f'FY{user_id:X}',
             ).add()
-            await session_context.get().flush()
-            return customer
 
-        customer.username = username
-        customer.updated_at = datetime.now()
-        return customer.add()
+        user.username = username
+        user.updated_at = datetime.now()
+        return user.add()
 
 
 class Favorite(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
-    customer_id: int = Field(foreign_key='customer.id', index=True, ondelete='CASCADE')
+    user_id: int = Field(
+        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
+    )
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
 
 
 class ProductView(SQLModel, table=True):
     id: int = Field(primary_key=True)
     viewed_at: datetime = Field(default_factory=datetime.now, index=True)
-    customer_id: int = Field(foreign_key='customer.id', index=True, ondelete='CASCADE')
+    user_id: int = Field(
+        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
+    )
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
 
 
@@ -109,7 +115,9 @@ class CartItem(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    customer_id: int = Field(foreign_key='customer.id', index=True, ondelete='CASCADE')
+    user_id: int = Field(
+        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
+    )
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
     quantity: int = Field(default=1, ge=1, le=999)
 
@@ -118,7 +126,7 @@ class AvailabilityRequest(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     status: str = Field(default='pending', index=True)
-    customer_id: int = Field(foreign_key='customer.id', index=True)
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     product_id: int = Field(foreign_key='product.id', index=True)
     requested_quantity: Optional[int] = Field(default=None, ge=1)
     available_quantity: Optional[int] = Field(default=None, ge=0)
@@ -132,7 +140,7 @@ class PromoCode(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     code: str = Field(index=True)
     partner_name: str
-    customer_discount_percent: Decimal = Field(
+    user_discount_percent: Decimal = Field(
         default=Decimal('10'), max_digits=5, decimal_places=2
     )
     partner_reward_percent: Decimal = Field(
@@ -145,7 +153,7 @@ class Order(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     number: str = Field(index=True)
-    customer_id: int = Field(foreign_key='customer.id', index=True)
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     status: str = Field(default='draft', index=True)
     payment_status: str = Field(default='not_paid', index=True)
     promo_code_id: Optional[int] = Field(default=None, foreign_key='promocode.id')
@@ -185,49 +193,8 @@ class OrderItem(SQLModel, table=True):
 class CoinTransaction(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
-    customer_id: int = Field(foreign_key='customer.id', index=True)
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     order_id: Optional[int] = Field(default=None, foreign_key='order.id', index=True)
     amount: Decimal = Field(max_digits=12, decimal_places=2)
     balance_after: Decimal = Field(max_digits=12, decimal_places=2)
     reason: str
-
-
-class Referral(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now)
-    inviter_id: int = Field(foreign_key='customer.id', index=True)
-    invitee_id: int = Field(foreign_key='customer.id', index=True)
-    subscription_confirmed: bool = False
-    reward_granted: bool = False
-    confirmed_at: Optional[datetime] = None
-
-
-class Review(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now)
-    customer_id: int = Field(foreign_key='customer.id', index=True)
-    product_id: Optional[int] = Field(default=None, foreign_key='product.id', index=True)
-    order_id: Optional[int] = Field(default=None, foreign_key='order.id', index=True)
-    rating: int = Field(ge=1, le=5)
-    text: str = Field(sa_type=Text)
-    is_published: bool = Field(default=False, index=True)
-
-
-class SupportRequest(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now)
-    customer_id: int = Field(foreign_key='customer.id', index=True)
-    status: str = Field(default='open', index=True)
-    subject: str
-    message: str = Field(sa_type=Text)
-    closed_at: Optional[datetime] = None
-
-
-class Payout(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    paid_at: datetime = Field(default_factory=datetime.now, index=True)
-    recipient_type: str = Field(index=True)
-    recipient_name: str = Field(index=True)
-    amount: Decimal = Field(max_digits=12, decimal_places=2)
-    note: Optional[str] = None
-    recorded_by_admin_id: int = Field(sa_type=BigInteger)

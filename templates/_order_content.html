@@ -1,0 +1,19 @@
+<div class="rounded-[2rem] bg-white p-6 shadow-soft">
+  <div class="flex items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-coral">Заказ</p><h1 class="mt-1 text-3xl font-black">{{ order.number }}</h1><p class="mt-2 text-sm text-black/50">{{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</p></div><span class="rounded-full bg-cream px-4 py-2 text-sm font-bold">{{ status_labels.get(order.status, order.status) }}</span></div>
+  <div class="mt-6 space-y-3 border-y border-black/10 py-5">
+    {% for item in items %}<div class="flex justify-between gap-4"><div><p class="font-bold">{{ item.product_name_snapshot }}</p><p class="text-sm text-black/45">{{ item.quantity }} шт. · {{ "%.0f"|format(item.sale_price_snapshot) }} ₽</p></div><strong>{{ "%.0f"|format(item.sale_price_snapshot * item.quantity) }} ₽</strong></div>{% endfor %}
+  </div>
+  <div class="mt-5 space-y-2 text-sm">
+    <div class="flex justify-between text-black/55"><span>До скидок</span><span>{{ "%.0f"|format(order.subtotal) }} ₽</span></div>
+    {% if order.product_discount_total %}<div class="flex justify-between text-black/55"><span>Скидка товаров</span><span>−{{ "%.0f"|format(order.product_discount_total) }} ₽</span></div>{% endif %}
+    {% if order.personal_discount_percent %}<div class="flex justify-between text-black/55"><span>Персональная скидка</span><span>{{ order.personal_discount_percent }}%</span></div>{% endif %}
+    {% if order.promo_discount_percent %}<div class="flex justify-between text-black/55"><span>Промокод</span><span>{{ order.promo_discount_percent }}%</span></div>{% endif %}
+    {% if order.coins_used %}<div class="flex justify-between text-black/55"><span>Коины</span><span>−{{ order.coins_used }}</span></div>{% endif %}
+    <div class="flex items-end justify-between pt-2"><span class="font-bold">К оплате</span><strong class="text-3xl">{{ "%.0f"|format(order.paid_total) }} ₽</strong></div>
+  </div>
+  {% if order.status == 'awaiting_payment' %}
+  <div class="mt-6 rounded-2xl bg-cream p-4 text-sm"><strong>Оплата пока работает как заглушка.</strong><p class="mt-1 text-black/55">Нажмите кнопку ниже — заказ перейдёт администратору на ручную проверку.</p></div>
+  <button onclick="reportPayment({{ order.id }}, this)" class="mt-3 w-full rounded-xl bg-ink py-4 font-black text-white disabled:opacity-50">Я оплатил</button>
+  {% elif order.status == 'payment_review' %}<p class="mt-6 rounded-2xl bg-cream p-4 text-center font-bold">Администратор проверяет оплату</p>
+  {% elif order.status == 'paid' %}<p class="mt-6 rounded-2xl bg-sage/20 p-4 text-center font-bold">Оплата подтверждена ✓</p>{% endif %}
+</div>

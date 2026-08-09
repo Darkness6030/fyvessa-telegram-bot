@@ -1,19 +1,36 @@
 {% if items %}
 <div class="space-y-3">
   {% for item in items %}{% set product = products_by_id.get(item.product_id) %}{% if product %}
-  <article class="flex items-center gap-4 rounded-[1.5rem] bg-white p-3 shadow-soft">
+  <article data-cart-item class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft">
     <a href="/products/{{ product.sku }}" class="h-24 w-20 overflow-hidden rounded-2xl bg-sand">{% if product.image_url %}<img src="{{ product.image_url }}" class="h-full w-full object-cover" alt="">{% endif %}</a>
     <div class="min-w-0 flex-1"><h2 class="truncate font-black">{{ product.name }}</h2>
-      <p class="mt-1 text-sm text-black/50">{{ item.quantity }} шт. · {{ "%.0f"|format(product.current_price) }} ₽</p>
-      <p class="mt-2 font-black">{{ "%.0f"|format(product.current_price * item.quantity) }} ₽</p></div>
+      <p class="mt-1 text-sm text-black/50">{{ "%.0f"|format(product.current_price) }} ₽ за шт.</p>
+      <div class="mt-2 flex items-center gap-2">
+        <button type="button" onclick="changeCartQuantity({{ product.id }}, -1, this)" class="grid h-8 w-8 place-items-center rounded-full bg-cream font-black">−</button>
+        <input data-cart-quantity readonly value="{{ item.quantity }}" aria-label="Количество" class="w-8 bg-transparent text-center font-black">
+        <button type="button" onclick="changeCartQuantity({{ product.id }}, 1, this)" class="grid h-8 w-8 place-items-center rounded-full bg-cream font-black">+</button>
+        <strong class="ml-auto">{{ "%.0f"|format(product.current_price * item.quantity) }} ₽</strong>
+      </div></div>
     <button onclick="removeFromCart({{ product.id }})" class="rounded-full px-3 py-2 text-black/35">✕</button>
   </article>
   {% endif %}{% endfor %}
 </div>
-<div class="mt-6 rounded-[1.5rem] bg-ink p-6 text-white">
+<form id="checkout-form" class="mt-6 rounded-[1.5rem] bg-ink p-6 text-white">
   <div class="flex items-end justify-between"><span class="text-white/55">Итого</span><strong class="text-3xl">{{ "%.0f"|format(total) }} ₽</strong></div>
-  <button onclick="showToast('Оформление заказа — следующий этап')" class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink">Перейти к оформлению</button>
-</div>
+  <div class="mt-5 space-y-3">
+    <label class="block text-sm"><span class="text-white/65">Скидка</span>
+      <select name="discount_mode" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink">
+        <option value="none">Без дополнительной скидки</option>
+        {% if user.personal_discount_percent %}<option value="personal">Персональная — {{ user.personal_discount_percent }}%</option>{% endif %}
+        <option value="promo">Использовать промокод</option>
+      </select>
+    </label>
+    <label class="block text-sm"><span class="text-white/65">Промокод, если выбран</span><input name="promo_code" autocomplete="off" class="mt-1 w-full rounded-xl bg-white px-4 py-3 uppercase text-ink" placeholder="Например, OUTSIDE"></label>
+    {% if user.coin_balance %}<label class="block text-sm"><span class="text-white/65">Списать коины (доступно {{ user.coin_balance }})</span><input name="coins_requested" type="number" min="0" max="{{ user.coin_balance }}" step="0.01" value="0" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink"></label>{% endif %}
+  </div>
+  {% if not user.is_registered %}<p class="mt-4 rounded-xl bg-coral/20 px-4 py-3 text-sm">Перед заказом потребуется <a href="/profile" class="font-black underline">заполнить профиль</a>.</p>{% endif %}
+  <button type="submit" class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:opacity-50">Оформить заказ</button>
+</form>
 {% else %}
 <div class="rounded-[2rem] border border-dashed border-black/20 p-12 text-center"><p class="text-4xl">🛒</p>
   <h2 class="mt-3 text-xl font-black">Корзина пуста</h2><a href="/catalog" class="mt-5 inline-flex rounded-full bg-ink px-5 py-3 font-bold text-white">Выбрать товары</a></div>

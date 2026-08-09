@@ -1,20 +1,35 @@
-from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from rewire import config, logger, simple_plugin
-from rewire_sqlmodel import transaction
+from rewire_sqlmodel import session_context, transaction
 from sqlmodel import col
 
 from src.auth import get_init_data_user
 from src.catalog import CatalogValidationError, sync_catalog
-from src.models import CartItem, Category, Customer, Favorite, Product, ProductView
+from src.models import (
+    AvailabilityRequest,
+    CartItem,
+    Category,
+    Favorite,
+    Order,
+    OrderItem,
+    Product,
+    ProductView,
+    User,
+)
+from src.orders import (
+    ORDER_STATUS_LABELS,
+    create_order_from_cart,
+    report_payment,
+)
 
 
 @config
@@ -25,29 +40,7 @@ class Config(BaseModel):
 plugin = simple_plugin()
 router = APIRouter()
 templates = Jinja2Templates(directory='templates')
-RequestCustomer = Annotated[Customer, Depends(get_init_data_user)]
-
-
-class CatalogFilters(TypedDict):
-    q: str
-    category_id: Optional[int]
-    min_price: Optional[int]
-    max_price: Optional[int]
-
-
-class CatalogContext(TypedDict):
-    request: Request
-    products: list[Product]
-    categories: list[Category]
-    categories_by_id: dict[int, Category]
-    is_new: Callable[[Product], bool]
-    filters: CatalogFilters
-
-
-class HomeContext(CatalogContext):
-    popular: list[Product]
-    recommended: list[Product]
-    new_products: list[Product]
+RequestUser = Annotated[User, Depends(get_init_data_user)]
 
 
 class HealthResponse(BaseModel):
@@ -60,12 +53,32 @@ class UpdateProfileRequest(BaseModel):
     birth_date: date
     phone_number: str
 
+    @field_validator('first_name', 'last_name')
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2 or len(value) > 80:
+            raise ValueError('Имя и фамилия должны содержать от 2 до 80 символов')
+        return value
 
-class UpdateProfileResponse(BaseModel):
-    ok: bool
+    @field_validator('birth_date')
+    @classmethod
+    def validate_birth_date(cls, value: date) -> date:
+        if value >= date.today():
+            raise ValueError('Укажите корректную дату рождения')
+        return value
+
+    @field_validator('phone_number')
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        digits = ''.join(character for character in value if character.isdigit())
+        if not 10 <= len(digits) <= 15:
+            raise ValueError('Укажите корректный номер телефона')
+        return value
 
 
-class RecordProductViewResponse(BaseModel):
+class OkResponse(BaseModel):
     ok: bool
 
 
@@ -81,8 +94,34 @@ class AddToCartResponse(BaseModel):
     quantity: int
 
 
-class RemoveFromCartResponse(BaseModel):
+class SetCartQuantityRequest(BaseModel):
+    quantity: int = Field(ge=1, le=999)
+
+
+class AvailabilityRequestBody(BaseModel):
+    quantity: int = Field(default=1, ge=1, le=999)
+
+
+class AvailabilityResponse(BaseModel):
+    request_id: int
+    status: str
+
+
+class CheckoutRequest(BaseModel):
+    discount_mode: str = 'none'
+    promo_code: str = ''
+    coins_requested: Decimal = Field(default=Decimal('0'), ge=0)
+
+
+class CheckoutResponse(BaseModel):
+    order_id: int
+    order_number: str
+    paid_total: Decimal
+
+
+class ReportPaymentResponse(BaseModel):
     ok: bool
+    status: str
 
 
 def _is_new(product: Product) -> bool:
@@ -98,7 +137,7 @@ async def _catalog_context(
     category_id: Optional[int] = None,
     min_price: Optional[int] = None,
     max_price: Optional[int] = None,
-) -> CatalogContext:
+) -> dict:
     query = Product.select().where(col(Product.is_active).is_(True))
     if q:
         query = query.where(col(Product.name).ilike(f'%{q.strip()}%'))
@@ -140,7 +179,7 @@ async def health() -> HealthResponse:
 @transaction(1)
 async def home(request: Request) -> HTMLResponse:
     catalog_context = await _catalog_context(request)
-    context: HomeContext = {
+    context = {
         **catalog_context,
         'popular': [
             product for product in catalog_context['products'] if product.is_popular
@@ -240,6 +279,24 @@ async def profile_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get('/orders', response_class=HTMLResponse)
+async def orders_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name='orders.html',
+        context={'request': request},
+    )
+
+
+@router.get('/orders/{order_id}', response_class=HTMLResponse)
+async def order_page(request: Request, order_id: int) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name='order.html',
+        context={'request': request, 'order_id': order_id},
+    )
+
+
 @router.get('/reviews', response_class=HTMLResponse)
 async def reviews_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -257,9 +314,9 @@ async def reviews_page(request: Request) -> HTMLResponse:
 @transaction(1)
 async def favorites_fragment(
     request: Request,
-    customer: RequestCustomer,
+    user: RequestUser,
 ) -> HTMLResponse:
-    favorites = await Favorite.select().filter_by(customer_id=customer.id).all()
+    favorites = await Favorite.select().filter_by(user_id=user.id).all()
     product_ids = [favorite.product_id for favorite in favorites]
     products = (
         list(await Product.select().where(col(Product.id).in_(product_ids)).all())
@@ -283,11 +340,11 @@ async def favorites_fragment(
 @transaction(1)
 async def recent_fragment(
     request: Request,
-    customer: RequestCustomer,
+    user: RequestUser,
 ) -> HTMLResponse:
     views = list(
         await ProductView.select()
-        .filter_by(customer_id=customer.id)
+        .filter_by(user_id=user.id)
         .order_by(ProductView.viewed_at.desc())
         .all()
     )[:20]
@@ -325,9 +382,9 @@ async def recent_fragment(
 @transaction(1)
 async def cart_fragment(
     request: Request,
-    customer: RequestCustomer,
+    user: RequestUser,
 ) -> HTMLResponse:
-    items = list(await CartItem.select().filter_by(customer_id=customer.id).all())
+    items = list(await CartItem.select().filter_by(user_id=user.id).all())
     products_by_id = (
         {
             product.id: product
@@ -353,6 +410,7 @@ async def cart_fragment(
             'items': items,
             'products_by_id': products_by_id,
             'total': total,
+            'user': user,
         },
     )
 
@@ -360,50 +418,96 @@ async def cart_fragment(
 @router.get('/api/profile', response_class=HTMLResponse)
 async def profile_fragment(
     request: Request,
-    customer: RequestCustomer,
+    user: RequestUser,
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name='_profile_content.html',
-        context={'request': request, 'customer': customer},
+        context={'request': request, 'user': user},
     )
 
 
-@router.post('/api/profile', response_model=UpdateProfileResponse)
+@router.get('/api/orders', response_class=HTMLResponse)
+@transaction(1)
+async def orders_fragment(
+    request: Request,
+    user: RequestUser,
+) -> HTMLResponse:
+    orders = list(
+        await Order.select()
+        .filter_by(user_id=user.id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name='_orders_content.html',
+        context={
+            'request': request,
+            'orders': orders,
+            'status_labels': ORDER_STATUS_LABELS,
+        },
+    )
+
+
+@router.get('/api/orders/{order_id}', response_class=HTMLResponse)
+@transaction(1)
+async def order_fragment(
+    request: Request,
+    order_id: int,
+    user: RequestUser,
+) -> HTMLResponse:
+    order = await Order.select().filter_by(id=order_id, user_id=user.id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail='Заказ не найден')
+    items = list(await OrderItem.select().filter_by(order_id=order.id).all())
+    return templates.TemplateResponse(
+        request=request,
+        name='_order_content.html',
+        context={
+            'request': request,
+            'order': order,
+            'items': items,
+            'status_labels': ORDER_STATUS_LABELS,
+        },
+    )
+
+
+@router.post('/api/profile', response_model=OkResponse)
 @transaction(1)
 async def update_profile(
     request: UpdateProfileRequest,
-    customer: RequestCustomer,
-) -> UpdateProfileResponse:
-    customer.first_name = request.first_name
-    customer.last_name = request.last_name
-    customer.birth_date = request.birth_date
-    customer.phone_number = request.phone_number
-    customer.updated_at = datetime.now()
-    customer.add()
-    return UpdateProfileResponse(ok=True)
+    user: RequestUser,
+) -> OkResponse:
+    user.first_name = request.first_name
+    user.last_name = request.last_name
+    user.birth_date = request.birth_date
+    user.phone_number = request.phone_number
+    user.updated_at = datetime.now()
+    user.add()
+    return OkResponse(ok=True)
 
 
 @router.post(
     '/api/products/{product_id}/view',
-    response_model=RecordProductViewResponse,
+    response_model=OkResponse,
 )
 @transaction(1)
 async def record_product_view(
     product_id: int,
-    customer: RequestCustomer,
-) -> RecordProductViewResponse:
+    user: RequestUser,
+) -> OkResponse:
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if not product:
         raise HTTPException(status_code=404, detail='Product not found')
 
     view = await ProductView.select().filter_by(
-        customer_id=customer.id,
+        user_id=user.id,
         product_id=product_id,
     ).first()
 
     if not view:
-        ProductView(customer_id=customer.id, product_id=product_id).add()
+        ProductView(user_id=user.id, product_id=product_id).add()
     else:
         view.viewed_at = datetime.now()
         view.add()
@@ -411,23 +515,23 @@ async def record_product_view(
     product.views_count += 1
     product.add()
 
-    return RecordProductViewResponse(ok=True)
+    return OkResponse(ok=True)
 
 
 @router.post('/api/favorites/{product_id}', response_model=ToggleFavoriteResponse)
 @transaction(1)
-async def toggle_favorite(product_id: int, customer: RequestCustomer) -> ToggleFavoriteResponse:
+async def toggle_favorite(product_id: int, user: RequestUser) -> ToggleFavoriteResponse:
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if not product:
         raise HTTPException(status_code=404, detail='Product not found')
 
     favorite = await Favorite.select().filter_by(
-        customer_id=customer.id,
+        user_id=user.id,
         product_id=product_id,
     ).first()
 
     if not favorite:
-        Favorite(customer_id=customer.id, product_id=product_id).add()
+        Favorite(user_id=user.id, product_id=product_id).add()
         return ToggleFavoriteResponse(favorite=True)
 
     await favorite.delete()
@@ -439,7 +543,7 @@ async def toggle_favorite(product_id: int, customer: RequestCustomer) -> ToggleF
 async def add_to_cart(
     product_id: int,
     request: AddToCartRequest,
-    customer: RequestCustomer,
+    user: RequestUser,
 ) -> AddToCartResponse:
     if not 1 <= request.quantity <= 999:
         raise HTTPException(
@@ -452,13 +556,13 @@ async def add_to_cart(
         raise HTTPException(status_code=404, detail='Product not found')
 
     item = await CartItem.select().filter_by(
-        customer_id=customer.id,
+        user_id=user.id,
         product_id=product_id,
     ).first()
 
     if not item:
         item = CartItem(
-            customer_id=customer.id,
+            user_id=user.id,
             product_id=product_id,
             quantity=request.quantity,
         ).add()
@@ -472,19 +576,106 @@ async def add_to_cart(
     return AddToCartResponse(quantity=item.quantity)
 
 
-@router.delete('/api/cart/{product_id}', response_model=RemoveFromCartResponse)
+@router.put('/api/cart/{product_id}', response_model=AddToCartResponse)
+@transaction(1)
+async def set_cart_quantity(
+    product_id: int,
+    request: SetCartQuantityRequest,
+    user: RequestUser,
+) -> AddToCartResponse:
+    item = await CartItem.select().filter_by(
+        user_id=user.id,
+        product_id=product_id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail='Товар отсутствует в корзине')
+    item.quantity = request.quantity
+    item.updated_at = datetime.now()
+    item.add()
+    return AddToCartResponse(quantity=item.quantity)
+
+
+@router.delete('/api/cart/{product_id}', response_model=OkResponse)
 @transaction(1)
 async def remove_from_cart(
     product_id: int,
-    customer: RequestCustomer,
-) -> RemoveFromCartResponse:
+    user: RequestUser,
+) -> OkResponse:
     item = await CartItem.select().filter_by(
-        customer_id=customer.id,
+        user_id=user.id,
         product_id=product_id,
     ).first()
     if item:
         await item.delete()
-    return RemoveFromCartResponse(ok=True)
+    return OkResponse(ok=True)
+
+
+@router.post(
+    '/api/availability/{product_id}',
+    response_model=AvailabilityResponse,
+)
+@transaction(1)
+async def request_availability(
+    product_id: int,
+    request: AvailabilityRequestBody,
+    user: RequestUser,
+) -> AvailabilityResponse:
+    product = await Product.select().filter_by(id=product_id, is_active=True).first()
+    if not product:
+        raise HTTPException(status_code=404, detail='Товар не найден')
+
+    availability = await AvailabilityRequest.select().filter_by(
+        user_id=user.id,
+        product_id=product_id,
+        status='pending',
+    ).first()
+    if availability:
+        availability.requested_quantity = request.quantity
+        availability.created_at = datetime.now()
+        availability.add()
+    else:
+        availability = AvailabilityRequest(
+            user_id=user.id,
+            product_id=product_id,
+            requested_quantity=request.quantity,
+        ).add()
+        await session_context.get().flush()
+    return AvailabilityResponse(request_id=availability.id, status=availability.status)
+
+
+@router.post('/api/orders', response_model=CheckoutResponse)
+@transaction(1)
+async def checkout(
+    request: CheckoutRequest,
+    user: RequestUser,
+) -> CheckoutResponse:
+    order = await create_order_from_cart(
+        user=user,
+        discount_mode=request.discount_mode,
+        promo_code=request.promo_code,
+        coins_requested=request.coins_requested,
+    )
+    return CheckoutResponse(
+        order_id=order.id,
+        order_number=order.number,
+        paid_total=order.paid_total,
+    )
+
+
+@router.post(
+    '/api/orders/{order_id}/report-payment',
+    response_model=ReportPaymentResponse,
+)
+@transaction(1)
+async def report_order_payment(
+    order_id: int,
+    user: RequestUser,
+) -> ReportPaymentResponse:
+    order = await Order.select().filter_by(id=order_id, user_id=user.id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail='Заказ не найден')
+    changed = await report_payment(order)
+    return ReportPaymentResponse(ok=changed, status=order.status)
 
 
 @plugin.setup()

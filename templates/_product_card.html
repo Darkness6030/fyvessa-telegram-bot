@@ -1,5 +1,5 @@
 {% macro product_card(product, category, is_new) -%}
-<article class="group min-w-0">
+<article class="group relative min-w-0">
   <a href="/products/{{ product.sku }}" class="block">
     <div class="relative aspect-[4/5] overflow-hidden rounded-[1.6rem] bg-sand shadow-soft">
       {% if product.image_url %}
@@ -11,7 +11,6 @@
         {% if is_new(product) %}<span class="rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-wider">Новинка</span>{% endif %}
         {% if product.discount_price %}<span class="rounded-full bg-coral px-3 py-1 text-[11px] font-black uppercase tracking-wider text-white">Скидка</span>{% endif %}
       </div>
-      <button type="button" onclick="event.preventDefault(); toggleFavorite({{ product.id }}, this)" class="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-xl shadow">♡</button>
     </div>
     <div class="px-1 pt-3">
       <p class="text-xs font-semibold uppercase tracking-wider text-black/45">{{ category.name if category else 'Каталог' }}</p>
@@ -22,5 +21,6 @@
       </div>
     </div>
   </a>
+  <button type="button" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorite({{ product.id }}, this)" aria-label="Добавить в избранное" class="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-xl shadow">♡</button>
 </article>
 {%- endmacro %}

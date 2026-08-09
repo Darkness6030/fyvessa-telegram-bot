@@ -1,10 +1,15 @@
 <form id="profile-form" class="space-y-4 rounded-[2rem] bg-white p-6 shadow-soft">
-  <label class="block"><span class="text-sm font-bold">Имя</span><input name="first_name" required value="{{ customer.first_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Фамилия</span><input name="last_name" required value="{{ customer.last_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Дата рождения</span><input name="birth_date" required type="date" value="{{ customer.birth_date or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
-  <label class="block"><span class="text-sm font-bold">Номер телефона</span><input name="phone_number" required type="tel" value="{{ customer.phone_number or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+  <label class="block"><span class="text-sm font-bold">Имя</span><input name="first_name" required value="{{ user.first_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+  <label class="block"><span class="text-sm font-bold">Фамилия</span><input name="last_name" required value="{{ user.last_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+  <label class="block"><span class="text-sm font-bold">Дата рождения</span><input name="birth_date" required type="date" value="{{ user.birth_date or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+  <label class="block"><span class="text-sm font-bold">Номер телефона</span><input name="phone_number" required type="tel" value="{{ user.phone_number or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
   <div class="rounded-xl bg-cream px-4 py-3 text-sm text-black/55">
-    Клиент №{{ "%06d"|format(customer.id) }} · @{{ customer.username or 'без username' }} · Telegram ID {{ customer.user_id }}
+    Telegram ID {{ user.id }} · @{{ user.username or 'без username' }}
+  </div>
+  <div class="grid grid-cols-2 gap-3">
+    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Коины</span><p class="font-black">{{ user.coin_balance }}</p></div>
+    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Скидка</span><p class="font-black">{{ user.personal_discount_percent }}%</p></div>
   </div>
   <button class="w-full rounded-xl bg-ink py-4 font-black text-white">Сохранить</button>
+  <a href="/orders" class="block w-full rounded-xl border border-black/10 py-4 text-center font-black">Мои заказы</a>
 </form>
