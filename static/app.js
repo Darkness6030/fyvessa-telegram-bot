@@ -1,14 +1,42 @@
 const tg = window.Telegram?.WebApp;
 if (tg) {
-    tg.ready();
-    tg.expand();
-    tg.setHeaderColor('#f5f1e8');
-    tg.setBackgroundColor('#f5f1e8');
+    for (const [method, args] of [
+        ['ready', []],
+        ['expand', []],
+        ['setHeaderColor', ['#f5f1e8']],
+        ['setBackgroundColor', ['#f5f1e8']]
+    ]) {
+        try { tg[method]?.(...args); } catch (_) {}
+    }
+}
+
+const INIT_DATA_STORAGE_KEY = 'fyvessa.telegramInitData';
+
+function initDataFromLocation() {
+    for (const source of [window.location.hash.slice(1), window.location.search.slice(1)]) {
+        if (!source) continue;
+        const value = new URLSearchParams(source).get('tgWebAppData');
+        if (value) return value;
+    }
+    return '';
 }
 
 function telegramAuthorization() {
-    if (!tg?.initData) throw new Error('Откройте этот раздел из Telegram');
-    return tg.initData;
+    let initData = tg?.initData || initDataFromLocation();
+    try {
+        if (initData) sessionStorage.setItem(INIT_DATA_STORAGE_KEY, initData);
+        else initData = sessionStorage.getItem(INIT_DATA_STORAGE_KEY) || '';
+    } catch (_) {}
+    if (!initData) throw new Error('Откройте магазин кнопкой бота внутри Telegram');
+    return initData;
+}
+
+function telegramHeaders() {
+    const initData = telegramAuthorization();
+    return {
+        'Authorization': initData,
+        'X-Telegram-Init-Data': initData
+    };
 }
 
 function showToast(message) {
@@ -32,7 +60,7 @@ async function api(url, options = {}) {
         ...options,
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': telegramAuthorization(),
+            ...telegramHeaders(),
             ...(options.headers || {})
         }
     });
@@ -46,7 +74,7 @@ async function api(url, options = {}) {
 async function loadProtectedFragment(container) {
     try {
         const response = await fetch(container.dataset.authFragment, {
-            headers: {'Authorization': telegramAuthorization()}
+            headers: telegramHeaders()
         });
         if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
@@ -80,7 +108,7 @@ function applyShopState(state) {
 }
 
 async function refreshShopState() {
-    if (!tg?.initData) return;
+    try { telegramAuthorization(); } catch (_) { return; }
     try { applyShopState(await api('/api/shop-state')); } catch (_) {}
 }
 
@@ -106,7 +134,10 @@ async function toggleFavorite(productId, button) {
         showToast(result.favorite ? 'Добавлено в избранное' : 'Удалено из избранного');
         tg?.HapticFeedback?.impactOccurred('light');
         const favorites = document.querySelector('[data-auth-fragment="/api/favorites"]');
-        if (favorites && !result.favorite) await loadProtectedFragment(favorites);
+        if (favorites && !result.favorite) {
+            await loadProtectedFragment(favorites);
+            await refreshShopState();
+        }
     } catch (error) { showToast(error.message); }
 }
 
@@ -154,7 +185,7 @@ async function removeFromCart(productId) {
 }
 
 async function recordProductView(productId) {
-    if (!tg?.initData) return;
+    try { telegramAuthorization(); } catch (_) { return; }
     try {
         await api(`/api/products/${productId}/view`, {method: 'POST'});
     } catch (_) {}
@@ -240,25 +271,6 @@ document.addEventListener('submit', async (event) => {
     if (event.target.id === 'checkout-form') {
         event.preventDefault();
         await checkout(event.target);
-    }
-    if (event.target.id === 'review-form') {
-        event.preventDefault();
-        const form = event.target;
-        const button = form.querySelector('[type="submit"], button');
-        const data = Object.fromEntries(new FormData(form).entries());
-        data.product_id = Number(data.product_id);
-        data.rating = Number(data.rating);
-        button.disabled = true;
-        button.textContent = 'Отправляем…';
-        try {
-            await api('/api/reviews', {method: 'POST', body: JSON.stringify(data)});
-            showToast('Отзыв отправлен на модерацию');
-            await loadProtectedFragment(form.closest('[data-auth-fragment]'));
-        } catch (error) {
-            button.disabled = false;
-            button.textContent = 'Отправить на модерацию';
-            showToast(error.message);
-        }
     }
     if (event.target.matches('[data-availability-form]')) {
         event.preventDefault();

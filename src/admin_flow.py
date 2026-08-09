@@ -19,7 +19,6 @@ from src.models import (
     Order,
     Product,
     PromoCode,
-    Review,
     User,
 )
 from src.orders import ORDER_STATUS_LABELS, cancel_order, confirm_payment
@@ -56,11 +55,6 @@ class UserSectionCallback(CallbackData, prefix='usr'):
 
 class PromoToggleCallback(CallbackData, prefix='promo'):
     promo_id: int
-
-
-class ReviewActionCallback(CallbackData, prefix='review'):
-    review_id: int
-    action: str
 
 
 AVAILABILITY_LABELS = {
@@ -155,41 +149,6 @@ async def notify_payment_review(bot: Bot, order: Order, user: User) -> bool:
     return True
 
 
-async def notify_review_request(
-    bot: Bot,
-    review: Review,
-    product: Product,
-    user: User,
-) -> bool:
-    chat_id = admin_chat_id()
-    if chat_id is None:
-        logger.error('ADMIN_CHAT_ID is not configured; review notification skipped')
-        return False
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text='✅ Опубликовать',
-        callback_data=ReviewActionCallback(review_id=review.id, action='approve'),
-    )
-    builder.button(
-        text='❌ Отклонить',
-        callback_data=ReviewActionCallback(review_id=review.id, action='reject'),
-    )
-    try:
-        await bot.send_message(
-            chat_id,
-            f'<b>Новый отзыв №{review.id}</b>\n\n'
-            f'Товар: <b>{html.escape(product.name)}</b>\n'
-            f'Оценка: {"★" * review.rating}{"☆" * (5 - review.rating)}\n'
-            f'Покупатель: {user.id}\n\n'
-            f'{html.escape(review.text)}',
-            reply_markup=builder.adjust(2).as_markup(),
-        )
-    except Exception as exc:
-        logger.error('Failed to notify admin chat about review: {}', exc)
-        return False
-    return True
-
-
 def admin_chat_id() -> int | None:
     value = Config.admin_chat_id.strip()
     try:
@@ -224,10 +183,6 @@ def _admin_keyboard():
     builder.button(
         text='🎟 Промокоды',
         callback_data=AdminSectionCallback(section='promos'),
-    )
-    builder.button(
-        text='⭐ Отзывы',
-        callback_data=AdminSectionCallback(section='reviews'),
     )
     builder.button(
         text='📊 Сводка',
@@ -569,40 +524,11 @@ async def admin_section(
                 f'{"активен" if promo.is_active else "отключён"}',
                 reply_markup=builder.as_markup(),
             )
-    elif section == 'reviews':
-        reviews = list(
-            await Review.select()
-            .filter_by(status='pending')
-            .order_by(Review.created_at.desc())
-            .all()
-        )[:20]
-        if not reviews:
-            await callback.message.answer('Отзывов на модерации нет.')
-        for review in reviews:
-            product = await Product.select().filter_by(id=review.product_id).first()
-            user = await User.select().filter_by(id=review.user_id).first()
-            builder = InlineKeyboardBuilder()
-            builder.button(
-                text='✅ Опубликовать',
-                callback_data=ReviewActionCallback(review_id=review.id, action='approve'),
-            )
-            builder.button(
-                text='❌ Отклонить',
-                callback_data=ReviewActionCallback(review_id=review.id, action='reject'),
-            )
-            await callback.message.answer(
-                f'<b>Отзыв №{review.id}</b> · {"★" * review.rating}\n'
-                f'{html.escape(product.name if product else "Товар удалён")} · '
-                f'пользователь {user.id if user else review.user_id}\n\n'
-                f'{html.escape(review.text)}',
-                reply_markup=builder.adjust(2).as_markup(),
-            )
     elif section == 'summary':
         products = list(await Product.select().all())
         users = list(await User.select().all())
         orders = list(await Order.select().all())
         pending = list(await AvailabilityRequest.select().filter_by(status='pending').all())
-        pending_reviews = list(await Review.select().filter_by(status='pending').all())
         review = [order for order in orders if order.status == 'payment_review']
         paid_total = sum(
             (order.paid_total for order in orders if order.payment_status == 'paid'),
@@ -615,7 +541,6 @@ async def admin_section(
             f'Заказов: {len(orders)}\n'
             f'Оплат на проверке: {len(review)}\n'
             f'Запросов наличия без ответа: {len(pending)}\n'
-            f'Отзывов на модерации: {len(pending_reviews)}\n'
             f'Подтверждено оплат: {paid_total} ₽'
         )
 
@@ -869,40 +794,6 @@ async def promo_toggle_callback(
         return await callback.answer('Промокод не найден', show_alert=True)
     await _toggle_promo(promo)
     await callback.answer('Включён' if promo.is_active else 'Отключён')
-    await callback.message.edit_reply_markup(reply_markup=None)
-
-
-@router.callback_query(ReviewActionCallback.filter())
-@transaction(1)
-async def review_action(
-    callback: CallbackQuery,
-    callback_data: ReviewActionCallback,
-    bot: Bot,
-):
-    if not _is_admin_chat(callback.message.chat.id):
-        return await callback.answer('Недостаточно прав', show_alert=True)
-    review = await Review.select().filter_by(id=callback_data.review_id).first()
-    if not review:
-        return await callback.answer('Отзыв не найден', show_alert=True)
-    if review.status != 'pending':
-        return await callback.answer('Отзыв уже обработан')
-    if callback_data.action not in {'approve', 'reject'}:
-        return await callback.answer('Неизвестное действие', show_alert=True)
-    review.status = 'published' if callback_data.action == 'approve' else 'rejected'
-    review.moderated_by_admin_id = callback.from_user.id
-    review.moderated_at = datetime.now()
-    review.updated_at = datetime.now()
-    review.add()
-    try:
-        await bot.send_message(
-            review.user_id,
-            'Ваш отзыв опубликован. Спасибо! ⭐'
-            if review.status == 'published'
-            else 'Ваш отзыв не прошёл модерацию.',
-        )
-    except Exception as exc:
-        logger.warning('Failed to notify user about review moderation: {}', exc)
-    await callback.answer('Отзыв опубликован' if review.status == 'published' else 'Отзыв отклонён')
     await callback.message.edit_reply_markup(reply_markup=None)
 
 

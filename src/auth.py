@@ -8,7 +8,11 @@ from rewire_sqlmodel import transaction
 
 from src.models import User
 
-authorization_header = APIKeyHeader(name='Authorization')
+authorization_header = APIKeyHeader(name='Authorization', auto_error=False)
+telegram_init_data_header = APIKeyHeader(
+    name='X-Telegram-Init-Data',
+    auto_error=False,
+)
 
 
 def parse_telegram_init_data(authorization: str, bot_token: str) -> WebAppInitData:
@@ -25,9 +29,15 @@ def parse_telegram_init_data(authorization: str, bot_token: str) -> WebAppInitDa
     return init_data
 
 
-async def get_init_data(authorization: Annotated[str, Depends(authorization_header)]) -> WebAppInitData:
+async def get_init_data(
+    authorization: Annotated[str | None, Depends(authorization_header)],
+    telegram_init_data: Annotated[str | None, Depends(telegram_init_data_header)],
+) -> WebAppInitData:
     from src.bot import Config
-    return parse_telegram_init_data(authorization, Config.token)
+    raw_init_data = telegram_init_data or authorization
+    if not raw_init_data:
+        raise HTTPException(status_code=401, detail='Откройте магазин из Telegram')
+    return parse_telegram_init_data(raw_init_data, Config.token)
 
 
 @transaction(1)

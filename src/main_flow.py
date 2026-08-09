@@ -18,6 +18,7 @@ from src.models import User
 class Config(BaseModel):
     mini_app_url: str
     channel_url: str
+    reviews_channel_url: str
     support_username: str
 
 
@@ -30,7 +31,7 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
     return (
         InlineKeyboardBuilder()
         .button(text='🛍 Каталог', web_app=WebAppInfo(url=Config.mini_app_url))
-        .button(text='⭐ Отзывы', web_app=WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/reviews'))
+        .button(text='⭐ Отзывы', url=Config.reviews_channel_url or Config.channel_url)
         .button(text='💬 Поддержка', url=f'https://t.me/{support_username}')
         .button(text='📣 Канал', url=Config.channel_url)
         .adjust(1).as_markup()

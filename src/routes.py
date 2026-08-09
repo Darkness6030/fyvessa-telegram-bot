@@ -5,19 +5,19 @@ from typing import Annotated, Optional
 
 from aiogram import Bot
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 from rewire import config, logger, simple_plugin
 from rewire_sqlmodel import session_context, transaction
+from sqlalchemy import func
 from sqlmodel import col
 
 from src.auth import get_init_data_user
 from src.admin_flow import (
     notify_availability_request,
     notify_payment_review,
-    notify_review_request,
 )
 from src.bot import get_bot
 from src.catalog import CatalogValidationError, sync_catalog
@@ -30,7 +30,6 @@ from src.models import (
     OrderItem,
     Product,
     ProductView,
-    Review,
     User,
 )
 from src.orders import (
@@ -45,6 +44,8 @@ from src.orders import (
 class Config(BaseModel):
     products_path: str = 'assets/products.xlsx'
     payment_details: str = 'Реквизиты для оплаты уточните в чате поддержки'
+    reviews_channel_url: str = ''
+    channel_url: str
 
 
 plugin = simple_plugin()
@@ -135,20 +136,6 @@ class ReportPaymentResponse(BaseModel):
     status: str
 
 
-class CreateReviewRequest(BaseModel):
-    product_id: int
-    rating: int = Field(ge=1, le=5)
-    text: str = Field(min_length=10, max_length=1000)
-
-    @field_validator('text')
-    @classmethod
-    def validate_text(cls, value: str) -> str:
-        value = value.strip()
-        if len(value) < 10:
-            raise ValueError('Отзыв должен содержать не менее 10 символов')
-        return value
-
-
 class ShopStateResponse(BaseModel):
     favorite_product_ids: list[int]
     cart_quantity: int
@@ -192,10 +179,11 @@ async def _catalog_context(
         query = query.where(col(Product.name).ilike(f'%{q.strip()}%'))
     if category_id:
         query = query.where(Product.category_id == category_id)
-    if min_price:
-        query = query.where(Product.retail_price >= min_price)
+    current_price = func.coalesce(Product.discount_price, Product.retail_price)
+    if min_price is not None:
+        query = query.where(current_price >= min_price)
     if max_price is not None:
-        query = query.where(Product.retail_price <= max_price)
+        query = query.where(current_price <= max_price)
 
     products = list(await query.order_by(Product.name).all())
     categories = list(
@@ -364,88 +352,9 @@ async def order_page(request: Request, order_id: int) -> HTMLResponse:
     )
 
 
-@router.get('/reviews', response_class=HTMLResponse)
-async def reviews_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name='reviews.html',
-        context={'request': request},
-    )
-
-
-@router.get('/api/reviews', response_class=HTMLResponse)
-@transaction(1)
-async def reviews_fragment(request: Request, user: RequestUser) -> HTMLResponse:
-    reviews = list(
-        await Review.select()
-        .filter_by(status='published')
-        .order_by(Review.created_at.desc())
-        .all()
-    )[:50]
-    review_product_ids = {review.product_id for review in reviews}
-    review_user_ids = {review.user_id for review in reviews}
-    products_by_id = {
-        product.id: product
-        for product in (
-            await Product.select().where(col(Product.id).in_(review_product_ids)).all()
-            if review_product_ids
-            else []
-        )
-    }
-    users_by_id = {
-        review_user.id: review_user
-        for review_user in (
-            await User.select().where(col(User.id).in_(review_user_ids)).all()
-            if review_user_ids
-            else []
-        )
-    }
-
-    paid_orders = list(
-        await Order.select()
-        .filter_by(user_id=user.id, payment_status='paid')
-        .order_by(Order.created_at.desc())
-        .all()
-    )
-    eligible_by_product: dict[int, tuple[Product, Order]] = {}
-    if paid_orders:
-        paid_order_ids = [order.id for order in paid_orders]
-        order_by_id = {order.id: order for order in paid_orders}
-        order_items = list(
-            await OrderItem.select()
-            .where(col(OrderItem.order_id).in_(paid_order_ids))
-            .all()
-        )
-        existing = list(await Review.select().filter_by(user_id=user.id).all())
-        reviewed_product_ids = {review.product_id for review in existing}
-        eligible_product_ids = {
-            item.product_id
-            for item in order_items
-            if item.product_id not in reviewed_product_ids
-        }
-        eligible_products = (
-            list(await Product.select().where(col(Product.id).in_(eligible_product_ids)).all())
-            if eligible_product_ids
-            else []
-        )
-        eligible_products_by_id = {product.id: product for product in eligible_products}
-        for item in order_items:
-            product = eligible_products_by_id.get(item.product_id)
-            order = order_by_id.get(item.order_id)
-            if product and order:
-                eligible_by_product.setdefault(product.id, (product, order))
-
-    return templates.TemplateResponse(
-        request=request,
-        name='_reviews_content.html',
-        context={
-            'request': request,
-            'reviews': reviews,
-            'products_by_id': products_by_id,
-            'users_by_id': users_by_id,
-            'eligible_items': list(eligible_by_product.values()),
-        },
-    )
+@router.get('/reviews', include_in_schema=False)
+async def reviews_page() -> RedirectResponse:
+    return RedirectResponse(Config.reviews_channel_url or Config.channel_url)
 
 
 @router.get('/api/favorites', response_class=HTMLResponse)
@@ -666,61 +575,6 @@ async def update_profile(
     return OkResponse(ok=True)
 
 
-@router.post('/api/reviews', response_model=OkResponse)
-@transaction(1)
-async def create_review(
-    request: CreateReviewRequest,
-    user: RequestUser,
-    bot: AppBot,
-) -> OkResponse:
-    existing = await Review.select().filter_by(
-        user_id=user.id,
-        product_id=request.product_id,
-    ).first()
-    if existing:
-        raise HTTPException(status_code=409, detail='Вы уже оставляли отзыв на этот товар')
-
-    paid_orders = list(
-        await Order.select().filter_by(user_id=user.id, payment_status='paid').all()
-    )
-    if not paid_orders:
-        raise HTTPException(
-            status_code=403,
-            detail='Оставить отзыв можно после подтверждённой покупки',
-        )
-    paid_order_ids = [order.id for order in paid_orders]
-    order_item = await (
-        OrderItem.select()
-        .where(col(OrderItem.order_id).in_(paid_order_ids))
-        .where(OrderItem.product_id == request.product_id)
-        .first()
-    )
-    if not order_item:
-        raise HTTPException(
-            status_code=403,
-            detail='Этот товар отсутствует в ваших оплаченных заказах',
-        )
-    product = await Product.select().filter_by(id=request.product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail='Товар не найден')
-
-    review = Review(
-        user_id=user.id,
-        product_id=product.id,
-        order_id=order_item.order_id,
-        rating=request.rating,
-        text=request.text,
-    ).add()
-    await session_context.get().flush()
-    delivered = await notify_review_request(bot, review, product, user)
-    if not delivered:
-        raise HTTPException(
-            status_code=503,
-            detail='Админский чат временно недоступен. Попробуйте ещё раз позже',
-        )
-    return OkResponse(ok=True)
-
-
 @router.post(
     '/api/products/{product_id}/view',
     response_model=OkResponse,
@@ -928,6 +782,9 @@ async def report_order_payment(
 
 @plugin.setup()
 def configure_web(app: FastAPI) -> None:
+    templates.env.globals['reviews_channel_url'] = (
+        Config.reviews_channel_url or Config.channel_url
+    )
     app.mount('/static', StaticFiles(directory=Path('static')), name='static')
     app.include_router(router)
 

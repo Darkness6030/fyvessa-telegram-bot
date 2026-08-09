@@ -188,17 +188,3 @@ class CoinTransaction(SQLModel, table=True):
     amount: Decimal = Field(max_digits=12, decimal_places=2)
     balance_after: Decimal = Field(max_digits=12, decimal_places=2)
     reason: str
-
-
-class Review(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.now, index=True)
-    updated_at: datetime = Field(default_factory=datetime.now)
-    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
-    product_id: int = Field(foreign_key='product.id', index=True)
-    order_id: int = Field(foreign_key='order.id', index=True)
-    rating: int = Field(ge=1, le=5)
-    text: str = Field(sa_type=Text)
-    status: str = Field(default='pending', index=True)
-    moderated_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
-    moderated_at: Optional[datetime] = None
