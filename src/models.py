@@ -96,18 +96,14 @@ class User(SQLModel, table=True):
 class Favorite(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
-    user_id: int = Field(
-        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
-    )
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
 
 
 class ProductView(SQLModel, table=True):
     id: int = Field(primary_key=True)
     viewed_at: datetime = Field(default_factory=datetime.now, index=True)
-    user_id: int = Field(
-        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
-    )
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
 
 
@@ -115,9 +111,7 @@ class CartItem(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    user_id: int = Field(
-        sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE'
-    )
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True, ondelete='CASCADE')
     product_id: int = Field(foreign_key='product.id', index=True, ondelete='CASCADE')
     quantity: int = Field(default=1, ge=1, le=999)
 
@@ -140,12 +134,8 @@ class PromoCode(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     code: str = Field(index=True)
     partner_name: str
-    user_discount_percent: Decimal = Field(
-        default=Decimal('10'), max_digits=5, decimal_places=2
-    )
-    partner_reward_percent: Decimal = Field(
-        default=Decimal('10'), max_digits=5, decimal_places=2
-    )
+    user_discount_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
+    partner_reward_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
     is_active: bool = Field(default=True, index=True)
 
 
@@ -198,3 +188,17 @@ class CoinTransaction(SQLModel, table=True):
     amount: Decimal = Field(max_digits=12, decimal_places=2)
     balance_after: Decimal = Field(max_digits=12, decimal_places=2)
     reason: str
+
+
+class Review(SQLModel, table=True):
+    id: int = Field(primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
+    product_id: int = Field(foreign_key='product.id', index=True)
+    order_id: int = Field(foreign_key='order.id', index=True)
+    rating: int = Field(ge=1, le=5)
+    text: str = Field(sa_type=Text)
+    status: str = Field(default='pending', index=True)
+    moderated_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
+    moderated_at: Optional[datetime] = None

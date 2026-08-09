@@ -20,10 +20,18 @@ class Config(BaseModel):
 
 
 plugin = simple_plugin()
+current_bot: Optional[Bot] = None
+
+
+def get_bot() -> Bot:
+    if current_bot is None:
+        raise RuntimeError('Telegram bot is not initialized')
+    return current_bot
 
 
 @plugin.setup()
 async def create_bot() -> Bot:
+    global current_bot
     session = AiohttpSession(api=TelegramAPIServer.from_base(Config.api_url), limit=1024) \
         if Config.api_url \
         else AiohttpSession(limit=1024)
@@ -33,6 +41,7 @@ async def create_bot() -> Bot:
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    current_bot = bot
     LifecycleModule.get().on_stop(bot.session.close)
     return bot
 

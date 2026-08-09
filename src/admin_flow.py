@@ -9,7 +9,7 @@ from aiogram.filters.command import CommandObject
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from pydantic import BaseModel
-from rewire import config, simple_plugin
+from rewire import config, logger, simple_plugin
 from rewire_sqlmodel import transaction
 from sqlalchemy import func
 
@@ -19,6 +19,7 @@ from src.models import (
     Order,
     Product,
     PromoCode,
+    Review,
     User,
 )
 from src.orders import ORDER_STATUS_LABELS, cancel_order, confirm_payment
@@ -26,7 +27,7 @@ from src.orders import ORDER_STATUS_LABELS, cancel_order, confirm_payment
 
 @config
 class Config(BaseModel):
-    admin_ids: str = ''
+    admin_chat_id: str = ''
     products_path: str = 'assets/products.xlsx'
 
 
@@ -57,28 +58,153 @@ class PromoToggleCallback(CallbackData, prefix='promo'):
     promo_id: int
 
 
+class ReviewActionCallback(CallbackData, prefix='review'):
+    review_id: int
+    action: str
+
+
 AVAILABILITY_LABELS = {
     'pending': 'Ожидает ответа',
     'available': 'Есть в наличии',
     'unavailable': 'Нет в наличии',
     'on_request': 'Под заказ / уточняется',
+    'used': 'Использовано в заказе',
 }
 
 
-def _admin_ids() -> set[int]:
-    return {
-        int(value.strip())
-        for value in Config.admin_ids.split(',')
-        if value.strip()
-    }
+def _availability_keyboard(request_id: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text='✅ Есть всё',
+        callback_data=AvailabilityActionCallback(
+            request_id=request_id,
+            status='available',
+        ),
+    )
+    builder.button(
+        text='❌ Нет',
+        callback_data=AvailabilityActionCallback(
+            request_id=request_id,
+            status='unavailable',
+        ),
+    )
+    builder.button(
+        text='⏳ Уточняется',
+        callback_data=AvailabilityActionCallback(
+            request_id=request_id,
+            status='on_request',
+        ),
+    )
+    return builder.adjust(2, 1).as_markup()
 
 
-def _is_admin(user_id: int) -> bool:
-    return user_id in _admin_ids()
+async def notify_availability_request(
+    bot: Bot,
+    availability: AvailabilityRequest,
+    product: Product,
+    user: User,
+) -> bool:
+    chat_id = admin_chat_id()
+    if chat_id is None:
+        logger.error('ADMIN_CHAT_ID is not configured; availability notification skipped')
+        return False
+    username = f'@{html.escape(user.username)}' if user.username else 'без username'
+    try:
+        await bot.send_message(
+            chat_id,
+            f'<b>Новый запрос наличия №{availability.id}</b>\n\n'
+            f'Товар: <b>{html.escape(product.name)}</b>\n'
+            f'SKU: <code>{html.escape(product.sku)}</code>\n'
+            f'Нужно: <b>{availability.requested_quantity or 1} шт.</b>\n'
+            f'Покупатель: {user.id} ({username})',
+            reply_markup=_availability_keyboard(availability.id),
+        )
+    except Exception as exc:
+        logger.error('Failed to notify admin chat about availability: {}', exc)
+        return False
+    return True
 
 
-async def _deny(message: Message) -> None:
-    await message.answer('Команда доступна только администратору.')
+async def notify_payment_review(bot: Bot, order: Order, user: User) -> bool:
+    chat_id = admin_chat_id()
+    if chat_id is None:
+        logger.error('ADMIN_CHAT_ID is not configured; payment notification skipped')
+        return False
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text='✅ Подтвердить оплату',
+        callback_data=OrderActionCallback(order_id=order.id, action='paid'),
+    )
+    builder.button(
+        text='✖️ Отменить заказ',
+        callback_data=OrderActionCallback(order_id=order.id, action='cancel'),
+    )
+    username = f'@{html.escape(user.username)}' if user.username else 'без username'
+    try:
+        await bot.send_message(
+            chat_id,
+            f'<b>Покупатель сообщил об оплате</b>\n\n'
+            f'Заказ: <b>{html.escape(order.number)}</b>\n'
+            f'Сумма: <b>{order.paid_total} ₽</b>\n'
+            f'Покупатель: {user.id} ({username})',
+            reply_markup=builder.adjust(1).as_markup(),
+        )
+    except Exception as exc:
+        logger.error('Failed to notify admin chat about payment: {}', exc)
+        return False
+    return True
+
+
+async def notify_review_request(
+    bot: Bot,
+    review: Review,
+    product: Product,
+    user: User,
+) -> bool:
+    chat_id = admin_chat_id()
+    if chat_id is None:
+        logger.error('ADMIN_CHAT_ID is not configured; review notification skipped')
+        return False
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text='✅ Опубликовать',
+        callback_data=ReviewActionCallback(review_id=review.id, action='approve'),
+    )
+    builder.button(
+        text='❌ Отклонить',
+        callback_data=ReviewActionCallback(review_id=review.id, action='reject'),
+    )
+    try:
+        await bot.send_message(
+            chat_id,
+            f'<b>Новый отзыв №{review.id}</b>\n\n'
+            f'Товар: <b>{html.escape(product.name)}</b>\n'
+            f'Оценка: {"★" * review.rating}{"☆" * (5 - review.rating)}\n'
+            f'Покупатель: {user.id}\n\n'
+            f'{html.escape(review.text)}',
+            reply_markup=builder.adjust(2).as_markup(),
+        )
+    except Exception as exc:
+        logger.error('Failed to notify admin chat about review: {}', exc)
+        return False
+    return True
+
+
+def admin_chat_id() -> int | None:
+    value = Config.admin_chat_id.strip()
+    try:
+        return int(value) if value else None
+    except ValueError:
+        return None
+
+
+def _is_admin_chat(chat_id: int) -> bool:
+    configured_chat_id = admin_chat_id()
+    return configured_chat_id is not None and chat_id == configured_chat_id
+
+
+async def _deny(message: Message):
+    await message.answer('Команда доступна только в админском чате.')
 
 
 def _admin_keyboard():
@@ -98,6 +224,10 @@ def _admin_keyboard():
     builder.button(
         text='🎟 Промокоды',
         callback_data=AdminSectionCallback(section='promos'),
+    )
+    builder.button(
+        text='⭐ Отзывы',
+        callback_data=AdminSectionCallback(section='reviews'),
     )
     builder.button(
         text='📊 Сводка',
@@ -126,13 +256,13 @@ def _help_text() -> str:
         '/promo CODE | Партнёр | скидка | вознаграждение — создать или обновить\n'
         '/promo_toggle CODE — включить или выключить промокод\n'
         '/sync_products — синхронизировать assets/products.xlsx\n\n'
-        'Безопасность: команды и кнопки проверяют Telegram ID из ADMIN_IDS.'
+        'Безопасность: команды и кнопки работают только в настроенном админском чате.'
     )
 
 
 @router.message(Command('admin'))
-async def admin_menu(message: Message) -> None:
-    if not _is_admin(message.from_user.id):
+async def admin_menu(message: Message):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     await message.answer(
         '<b>Администрирование Fyvessa</b>\n\n'
@@ -142,7 +272,7 @@ async def admin_menu(message: Message) -> None:
     )
 
 
-async def _run_sync(message: Message) -> None:
+async def _run_sync(message: Message):
     try:
         report = await sync_catalog(Config.products_path)
     except CatalogValidationError as exc:
@@ -160,8 +290,8 @@ async def _run_sync(message: Message) -> None:
 
 
 @router.message(Command('sync_products'))
-async def sync_products_command(message: Message) -> None:
-    if not _is_admin(message.from_user.id):
+async def sync_products_command(message: Message):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     await _run_sync(message)
 
@@ -225,8 +355,8 @@ def _user_keyboard(user_id: int):
 
 @router.message(Command('user'))
 @transaction(1)
-async def user_command(message: Message, command: CommandObject) -> None:
-    if not _is_admin(message.from_user.id):
+async def user_command(message: Message, command: CommandObject):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     user = await _find_user(command.args or '')
     if not user:
@@ -241,7 +371,7 @@ async def user_command(message: Message, command: CommandObject) -> None:
     )
 
 
-async def _send_user_orders(message: Message, user: User) -> None:
+async def _send_user_orders(message: Message, user: User):
     orders = list(
         await Order.select()
         .filter_by(user_id=user.id)
@@ -273,7 +403,7 @@ async def _send_user_orders(message: Message, user: User) -> None:
 async def _send_availability_requests(
     message: Message,
     user_id: int | None = None,
-) -> None:
+):
     query = AvailabilityRequest.select()
     if user_id is None:
         query = query.filter_by(status='pending')
@@ -373,8 +503,8 @@ async def _resolve_availability(
 async def admin_section(
     callback: CallbackQuery,
     callback_data: AdminSectionCallback,
-) -> None:
-    if not _is_admin(callback.from_user.id):
+):
+    if not _is_admin_chat(callback.message.chat.id):
         return await callback.answer('Недостаточно прав', show_alert=True)
     section = callback_data.section
     if section == 'sync':
@@ -439,11 +569,40 @@ async def admin_section(
                 f'{"активен" if promo.is_active else "отключён"}',
                 reply_markup=builder.as_markup(),
             )
+    elif section == 'reviews':
+        reviews = list(
+            await Review.select()
+            .filter_by(status='pending')
+            .order_by(Review.created_at.desc())
+            .all()
+        )[:20]
+        if not reviews:
+            await callback.message.answer('Отзывов на модерации нет.')
+        for review in reviews:
+            product = await Product.select().filter_by(id=review.product_id).first()
+            user = await User.select().filter_by(id=review.user_id).first()
+            builder = InlineKeyboardBuilder()
+            builder.button(
+                text='✅ Опубликовать',
+                callback_data=ReviewActionCallback(review_id=review.id, action='approve'),
+            )
+            builder.button(
+                text='❌ Отклонить',
+                callback_data=ReviewActionCallback(review_id=review.id, action='reject'),
+            )
+            await callback.message.answer(
+                f'<b>Отзыв №{review.id}</b> · {"★" * review.rating}\n'
+                f'{html.escape(product.name if product else "Товар удалён")} · '
+                f'пользователь {user.id if user else review.user_id}\n\n'
+                f'{html.escape(review.text)}',
+                reply_markup=builder.adjust(2).as_markup(),
+            )
     elif section == 'summary':
         products = list(await Product.select().all())
         users = list(await User.select().all())
         orders = list(await Order.select().all())
         pending = list(await AvailabilityRequest.select().filter_by(status='pending').all())
+        pending_reviews = list(await Review.select().filter_by(status='pending').all())
         review = [order for order in orders if order.status == 'payment_review']
         paid_total = sum(
             (order.paid_total for order in orders if order.payment_status == 'paid'),
@@ -456,6 +615,7 @@ async def admin_section(
             f'Заказов: {len(orders)}\n'
             f'Оплат на проверке: {len(review)}\n'
             f'Запросов наличия без ответа: {len(pending)}\n'
+            f'Отзывов на модерации: {len(pending_reviews)}\n'
             f'Подтверждено оплат: {paid_total} ₽'
         )
 
@@ -465,8 +625,8 @@ async def admin_section(
 async def user_section(
     callback: CallbackQuery,
     callback_data: UserSectionCallback,
-) -> None:
-    if not _is_admin(callback.from_user.id):
+):
+    if not _is_admin_chat(callback.message.chat.id):
         return await callback.answer('Недостаточно прав', show_alert=True)
     user = await User.select().filter_by(id=callback_data.user_id).first()
     if not user:
@@ -488,8 +648,8 @@ async def availability_action(
     callback: CallbackQuery,
     callback_data: AvailabilityActionCallback,
     bot: Bot,
-) -> None:
-    if not _is_admin(callback.from_user.id):
+):
+    if not _is_admin_chat(callback.message.chat.id):
         return await callback.answer('Недостаточно прав', show_alert=True)
     availability = await AvailabilityRequest.select().filter_by(
         id=callback_data.request_id
@@ -515,8 +675,8 @@ async def availability_command(
     message: Message,
     command: CommandObject,
     bot: Bot,
-) -> None:
-    if not _is_admin(message.from_user.id):
+):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     parts = (command.args or '').split(maxsplit=3)
     if len(parts) < 2 or not parts[0].isdigit():
@@ -576,8 +736,8 @@ async def order_action(
     callback: CallbackQuery,
     callback_data: OrderActionCallback,
     bot: Bot,
-) -> None:
-    if not _is_admin(callback.from_user.id):
+):
+    if not _is_admin_chat(callback.message.chat.id):
         return await callback.answer('Недостаточно прав', show_alert=True)
     order = await Order.select().filter_by(id=callback_data.order_id).first()
     if not order:
@@ -598,8 +758,8 @@ async def order_action(
 
 @router.message(Command('order'))
 @transaction(1)
-async def order_command(message: Message, command: CommandObject, bot: Bot) -> None:
-    if not _is_admin(message.from_user.id):
+async def order_command(message: Message, command: CommandObject, bot: Bot):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     parts = (command.args or '').split()
     if len(parts) != 2 or not parts[0].isdigit():
@@ -619,8 +779,8 @@ async def order_command(message: Message, command: CommandObject, bot: Bot) -> N
 
 @router.message(Command('discount'))
 @transaction(1)
-async def discount_command(message: Message, command: CommandObject) -> None:
-    if not _is_admin(message.from_user.id):
+async def discount_command(message: Message, command: CommandObject):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     parts = (command.args or '').rsplit(maxsplit=1)
     if len(parts) != 2:
@@ -644,8 +804,8 @@ async def discount_command(message: Message, command: CommandObject) -> None:
 
 @router.message(Command('promo'))
 @transaction(1)
-async def promo_command(message: Message, command: CommandObject) -> None:
-    if not _is_admin(message.from_user.id):
+async def promo_command(message: Message, command: CommandObject):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     parts = [part.strip() for part in (command.args or '').split('|')]
     if len(parts) != 4:
@@ -677,15 +837,15 @@ async def promo_command(message: Message, command: CommandObject) -> None:
     await message.answer(f'Промокод <b>{html.escape(code)}</b> сохранён и активен.')
 
 
-async def _toggle_promo(promo: PromoCode) -> None:
+async def _toggle_promo(promo: PromoCode):
     promo.is_active = not promo.is_active
     promo.add()
 
 
 @router.message(Command('promo_toggle'))
 @transaction(1)
-async def promo_toggle_command(message: Message, command: CommandObject) -> None:
-    if not _is_admin(message.from_user.id):
+async def promo_toggle_command(message: Message, command: CommandObject):
+    if not _is_admin_chat(message.chat.id):
         return await _deny(message)
     code = (command.args or '').strip().upper()
     promo = await PromoCode.select().where(func.upper(PromoCode.code) == code).first()
@@ -701,8 +861,8 @@ async def promo_toggle_command(message: Message, command: CommandObject) -> None
 async def promo_toggle_callback(
     callback: CallbackQuery,
     callback_data: PromoToggleCallback,
-) -> None:
-    if not _is_admin(callback.from_user.id):
+):
+    if not _is_admin_chat(callback.message.chat.id):
         return await callback.answer('Недостаточно прав', show_alert=True)
     promo = await PromoCode.select().filter_by(id=callback_data.promo_id).first()
     if not promo:
@@ -712,6 +872,40 @@ async def promo_toggle_callback(
     await callback.message.edit_reply_markup(reply_markup=None)
 
 
+@router.callback_query(ReviewActionCallback.filter())
+@transaction(1)
+async def review_action(
+    callback: CallbackQuery,
+    callback_data: ReviewActionCallback,
+    bot: Bot,
+):
+    if not _is_admin_chat(callback.message.chat.id):
+        return await callback.answer('Недостаточно прав', show_alert=True)
+    review = await Review.select().filter_by(id=callback_data.review_id).first()
+    if not review:
+        return await callback.answer('Отзыв не найден', show_alert=True)
+    if review.status != 'pending':
+        return await callback.answer('Отзыв уже обработан')
+    if callback_data.action not in {'approve', 'reject'}:
+        return await callback.answer('Неизвестное действие', show_alert=True)
+    review.status = 'published' if callback_data.action == 'approve' else 'rejected'
+    review.moderated_by_admin_id = callback.from_user.id
+    review.moderated_at = datetime.now()
+    review.updated_at = datetime.now()
+    review.add()
+    try:
+        await bot.send_message(
+            review.user_id,
+            'Ваш отзыв опубликован. Спасибо! ⭐'
+            if review.status == 'published'
+            else 'Ваш отзыв не прошёл модерацию.',
+        )
+    except Exception as exc:
+        logger.warning('Failed to notify user about review moderation: {}', exc)
+    await callback.answer('Отзыв опубликован' if review.status == 'published' else 'Отзыв отклонён')
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+
 @plugin.setup()
-def include_router(dispatcher: Dispatcher) -> None:
+def include_router(dispatcher: Dispatcher):
     dispatcher.include_router(router)

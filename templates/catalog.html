@@ -13,8 +13,8 @@
       <option value="{{ category.id }}" {% if filters.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
       {% endfor %}
     </select>
-    <input name="min_price" type="number" min="0" value="{{ filters.min_price or '' }}" placeholder="Цена от" class="rounded-xl bg-cream px-3 py-3 outline-none">
-    <input name="max_price" type="number" min="0" value="{{ filters.max_price or '' }}" placeholder="Цена до" class="rounded-xl bg-cream px-3 py-3 outline-none">
+    <input name="min_price" type="number" min="0" value="{{ filters.min_price if filters.min_price is not none else '' }}" placeholder="Цена от" class="rounded-xl bg-cream px-3 py-3 outline-none">
+    <input name="max_price" type="number" min="0" value="{{ filters.max_price if filters.max_price is not none else '' }}" placeholder="Цена до" class="rounded-xl bg-cream px-3 py-3 outline-none">
     <button class="rounded-xl bg-ink px-5 py-3 font-bold text-white">Показать</button>
   </form>
 </section>

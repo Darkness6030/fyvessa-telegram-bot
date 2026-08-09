@@ -1,6 +1,7 @@
 {% if items %}
-<div class="space-y-3">
+<div class="space-y-3" data-cart-pending="{{ 'true' if has_pending_requests else 'false' }}">
   {% for item in items %}{% set product = products_by_id.get(item.product_id) %}{% if product %}
+  {% set availability = availability_by_product.get(product.id) %}
   <article data-cart-item class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft">
     <a href="/products/{{ product.sku }}" class="h-24 w-20 overflow-hidden rounded-2xl bg-sand">{% if product.image_url %}<img src="{{ product.image_url }}" class="h-full w-full object-cover" alt="">{% endif %}</a>
     <div class="min-w-0 flex-1"><h2 class="truncate font-black">{{ product.name }}</h2>
@@ -10,6 +11,19 @@
         <input data-cart-quantity readonly value="{{ item.quantity }}" aria-label="Количество" class="w-8 bg-transparent text-center font-black">
         <button type="button" onclick="changeCartQuantity({{ product.id }}, 1, this)" class="grid h-8 w-8 place-items-center rounded-full bg-cream font-black">+</button>
         <strong class="ml-auto">{{ "%.0f"|format(product.current_price * item.quantity) }} ₽</strong>
+      </div>
+      <div class="mt-3 flex items-center gap-2 text-xs">
+        {% if product.id in confirmed_product_ids %}
+        <span class="rounded-full bg-sage/20 px-3 py-1.5 font-bold">Наличие подтверждено ✓</span>
+        {% elif availability and availability.status == 'pending' %}
+        <span class="rounded-full bg-sand/60 px-3 py-1.5 font-bold">Администратор проверяет…</span>
+        {% else %}
+        <button type="button" onclick="requestCartAvailability({{ product.id }}, {{ item.quantity }}, this)" class="rounded-full bg-coral px-3 py-1.5 font-bold text-white">
+          {{ 'Запросить повторно' if availability else 'Подтвердить наличие' }}
+        </button>
+        {% if availability and availability.status == 'unavailable' %}<span class="text-coral">Нет в наличии</span>{% endif %}
+        {% if availability and availability.status == 'on_request' %}<span class="text-black/45">Требуется уточнение</span>{% endif %}
+        {% endif %}
       </div></div>
     <button onclick="removeFromCart({{ product.id }})" class="rounded-full px-3 py-2 text-black/35">✕</button>
   </article>
@@ -29,7 +43,8 @@
     {% if user.coin_balance %}<label class="block text-sm"><span class="text-white/65">Списать коины (доступно {{ user.coin_balance }})</span><input name="coins_requested" type="number" min="0" max="{{ user.coin_balance }}" step="0.01" value="0" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink"></label>{% endif %}
   </div>
   {% if not user.is_registered %}<p class="mt-4 rounded-xl bg-coral/20 px-4 py-3 text-sm">Перед заказом потребуется <a href="/profile" class="font-black underline">заполнить профиль</a>.</p>{% endif %}
-  <button type="submit" class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:opacity-50">Оформить заказ</button>
+  {% if missing_confirmation_count %}<p class="mt-4 rounded-xl bg-white/10 px-4 py-3 text-sm">Для оформления подтвердите нужное количество каждого товара. Запрос сразу появится в админском чате.</p>{% endif %}
+  <button type="submit" {% if missing_confirmation_count %}disabled{% endif %} class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:cursor-not-allowed disabled:opacity-40">{{ 'Ждём подтверждения наличия' if missing_confirmation_count else 'Оформить заказ' }}</button>
 </form>
 {% else %}
 <div class="rounded-[2rem] border border-dashed border-black/20 p-12 text-center"><p class="text-4xl">🛒</p>

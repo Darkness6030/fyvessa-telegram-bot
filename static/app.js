@@ -53,15 +53,35 @@ async function loadProtectedFragment(container) {
             throw new Error(errorMessage(payload));
         }
         container.innerHTML = await response.text();
+        if (container.dataset.authFragment === '/api/cart') scheduleCartPolling(container);
     } catch (error) {
         container.innerHTML = `<div class="rounded-[2rem] border border-dashed border-black/20 p-10 text-center"><p class="text-3xl">↗</p><h2 class="mt-3 text-xl font-black">Нужен Telegram</h2><p class="mt-2 text-black/50">${error.message}</p></div>`;
     }
 }
 
 async function loadProtectedFragments() {
-    for (const container of document.querySelectorAll('[data-auth-fragment]')) {
-        await loadProtectedFragment(container);
-    }
+    await Promise.all(
+        [...document.querySelectorAll('[data-auth-fragment]')].map(loadProtectedFragment)
+    );
+}
+
+function applyShopState(state) {
+    const favoriteIds = new Set(state.favorite_product_ids || []);
+    document.querySelectorAll('[data-favorite-product-id]').forEach((button) => {
+        const isFavorite = favoriteIds.has(Number(button.dataset.favoriteProductId));
+        button.textContent = isFavorite ? '♥' : '♡';
+        button.setAttribute('aria-label', isFavorite ? 'Удалить из избранного' : 'Добавить в избранное');
+    });
+    document.querySelectorAll('[data-cart-count]').forEach((badge) => {
+        const count = Number(state.cart_quantity || 0);
+        badge.textContent = count;
+        badge.classList.toggle('hidden', count === 0);
+    });
+}
+
+async function refreshShopState() {
+    if (!tg?.initData) return;
+    try { applyShopState(await api('/api/shop-state')); } catch (_) {}
 }
 
 async function refreshCart() {
@@ -69,23 +89,47 @@ async function refreshCart() {
     if (container) await loadProtectedFragment(container);
 }
 
+function scheduleCartPolling(container) {
+    clearTimeout(window.__fyvessaCartPollTimer);
+    if (!container.querySelector('[data-cart-pending="true"]')) return;
+    window.__fyvessaCartPollTimer = setTimeout(async () => {
+        if (document.body.contains(container)) await loadProtectedFragment(container);
+    }, 5000);
+}
+
 async function toggleFavorite(productId, button) {
     try {
         const result = await api(`/api/favorites/${productId}`, {method: 'POST'});
-        if (button) button.textContent = result.favorite ? '♥' : '♡';
+        document.querySelectorAll(`[data-favorite-product-id="${productId}"]`).forEach((item) => {
+            item.textContent = result.favorite ? '♥' : '♡';
+        });
         showToast(result.favorite ? 'Добавлено в избранное' : 'Удалено из избранного');
         tg?.HapticFeedback?.impactOccurred('light');
+        const favorites = document.querySelector('[data-auth-fragment="/api/favorites"]');
+        if (favorites && !result.favorite) await loadProtectedFragment(favorites);
     } catch (error) { showToast(error.message); }
 }
 
-async function addToCart(productId, quantity = 1) {
+async function addToCart(productId, quantity = 1, button = null) {
+    const originalText = button?.textContent;
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Добавляем…';
+    }
     try {
         const result = await api(`/api/cart/${productId}`, {
             method: 'POST', body: JSON.stringify({quantity})
         });
         showToast(`В корзине: ${result.quantity} шт.`);
         tg?.HapticFeedback?.notificationOccurred('success');
+        await refreshShopState();
     } catch (error) { showToast(error.message); }
+    finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
 }
 
 async function changeCartQuantity(productId, delta, button) {
@@ -96,6 +140,7 @@ async function changeCartQuantity(productId, delta, button) {
             method: 'PUT', body: JSON.stringify({quantity})
         });
         await refreshCart();
+        await refreshShopState();
     } catch (error) { showToast(error.message); }
 }
 
@@ -103,6 +148,7 @@ async function removeFromCart(productId) {
     try {
         await api(`/api/cart/${productId}`, {method: 'DELETE'});
         await refreshCart();
+        await refreshShopState();
         showToast('Товар удалён');
     } catch (error) { showToast(error.message); }
 }
@@ -114,16 +160,37 @@ async function recordProductView(productId) {
     } catch (_) {}
 }
 
-async function requestAvailability(productId, form) {
-    const quantity = Number(new FormData(form).get('quantity'));
+async function sendAvailabilityRequest(productId, quantity, button) {
+    const originalText = button?.textContent;
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Отправляем…';
+    }
     try {
         await api(`/api/availability/${productId}`, {
             method: 'POST', body: JSON.stringify({quantity})
         });
         showToast('Запрос отправлен администратору');
-        form.querySelector('button').textContent = 'Запрос отправлен ✓';
+        if (button) button.textContent = 'Запрос отправлен ✓';
         tg?.HapticFeedback?.notificationOccurred('success');
-    } catch (error) { showToast(error.message); }
+        return true;
+    } catch (error) {
+        showToast(error.message);
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+        return false;
+    }
+}
+
+async function requestAvailability(productId, form) {
+    const quantity = Number(new FormData(form).get('quantity'));
+    await sendAvailabilityRequest(productId, quantity, form.querySelector('button'));
+}
+
+async function requestCartAvailability(productId, quantity, button) {
+    if (await sendAvailabilityRequest(productId, quantity, button)) await refreshCart();
 }
 
 async function checkout(form) {
@@ -167,11 +234,31 @@ document.addEventListener('submit', async (event) => {
         try {
             await api('/api/profile', {method: 'POST', body: JSON.stringify(data)});
             showToast('Профиль сохранён');
+            await loadProtectedFragment(event.target.closest('[data-auth-fragment]'));
         } catch (error) { showToast(error.message); }
     }
     if (event.target.id === 'checkout-form') {
         event.preventDefault();
         await checkout(event.target);
+    }
+    if (event.target.id === 'review-form') {
+        event.preventDefault();
+        const form = event.target;
+        const button = form.querySelector('[type="submit"], button');
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.product_id = Number(data.product_id);
+        data.rating = Number(data.rating);
+        button.disabled = true;
+        button.textContent = 'Отправляем…';
+        try {
+            await api('/api/reviews', {method: 'POST', body: JSON.stringify(data)});
+            showToast('Отзыв отправлен на модерацию');
+            await loadProtectedFragment(form.closest('[data-auth-fragment]'));
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = 'Отправить на модерацию';
+            showToast(error.message);
+        }
     }
     if (event.target.matches('[data-availability-form]')) {
         event.preventDefault();
@@ -179,4 +266,4 @@ document.addEventListener('submit', async (event) => {
     }
 });
 
-loadProtectedFragments();
+loadProtectedFragments().then(refreshShopState);

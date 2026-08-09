@@ -7,10 +7,11 @@ src:
     channel_url: !env "CHANNEL_URL:"
     support_username: !env "SUPPORT_USERNAME:"
   admin_flow:
-    admin_ids: !env "ADMIN_IDS:"
+    admin_chat_id: !env "ADMIN_CHAT_ID:"
     products_path: !env "PRODUCTS_PATH:"
   routes:
     products_path: !env "PRODUCTS_PATH:"
+    payment_details: !env "PAYMENT_DETAILS:Реквизиты для оплаты уточните в чате поддержки"
 rewire:
   log:
     sinks:
@@ -35,7 +36,7 @@ rewire_sqlmodel:
   url: !pyexec return getenv("DATABASE_URL").replace("sqlite://", "sqlite+aiosqlite://").replace("postgresql://", "postgresql+asyncpg://")
   expire_on_commit: false
   alembic:
-    generate: true
+    generate: false
     schema_migrations: true
     env:
       render_as_batch: true

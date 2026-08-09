@@ -10,6 +10,11 @@
     <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Коины</span><p class="font-black">{{ user.coin_balance }}</p></div>
     <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Скидка</span><p class="font-black">{{ user.personal_discount_percent }}%</p></div>
   </div>
+  <div class="grid grid-cols-3 gap-2 text-center text-sm">
+    <a href="/orders" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ orders_count }}</strong><span class="text-black/45">Заказы</span></a>
+    <a href="/favorites" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ favorites_count }}</strong><span class="text-black/45">Избранное</span></a>
+    <a href="/cart" class="rounded-xl border border-black/10 px-2 py-3"><strong class="block text-lg">{{ cart_quantity }}</strong><span class="text-black/45">В корзине</span></a>
+  </div>
   <button class="w-full rounded-xl bg-ink py-4 font-black text-white">Сохранить</button>
   <a href="/orders" class="block w-full rounded-xl border border-black/10 py-4 text-center font-black">Мои заказы</a>
 </form>

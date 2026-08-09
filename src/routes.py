@@ -3,7 +3,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from aiogram import Bot
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -13,6 +14,12 @@ from rewire_sqlmodel import session_context, transaction
 from sqlmodel import col
 
 from src.auth import get_init_data_user
+from src.admin_flow import (
+    notify_availability_request,
+    notify_payment_review,
+    notify_review_request,
+)
+from src.bot import get_bot
 from src.catalog import CatalogValidationError, sync_catalog
 from src.models import (
     AvailabilityRequest,
@@ -23,10 +30,12 @@ from src.models import (
     OrderItem,
     Product,
     ProductView,
+    Review,
     User,
 )
 from src.orders import (
     ORDER_STATUS_LABELS,
+    confirmed_cart_availability,
     create_order_from_cart,
     report_payment,
 )
@@ -35,12 +44,14 @@ from src.orders import (
 @config
 class Config(BaseModel):
     products_path: str = 'assets/products.xlsx'
+    payment_details: str = 'Реквизиты для оплаты уточните в чате поддержки'
 
 
 plugin = simple_plugin()
 router = APIRouter()
 templates = Jinja2Templates(directory='templates')
 RequestUser = Annotated[User, Depends(get_init_data_user)]
+AppBot = Annotated[Bot, Depends(get_bot)]
 
 
 class HealthResponse(BaseModel):
@@ -124,6 +135,44 @@ class ReportPaymentResponse(BaseModel):
     status: str
 
 
+class CreateReviewRequest(BaseModel):
+    product_id: int
+    rating: int = Field(ge=1, le=5)
+    text: str = Field(min_length=10, max_length=1000)
+
+    @field_validator('text')
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError('Отзыв должен содержать не менее 10 символов')
+        return value
+
+
+class ShopStateResponse(BaseModel):
+    favorite_product_ids: list[int]
+    cart_quantity: int
+
+
+def _optional_nonnegative_int(value: str, field_name: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f'Поле «{field_name}» должно быть целым числом',
+        ) from exc
+    if parsed < 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f'Поле «{field_name}» не может быть отрицательным',
+        )
+    return parsed
+
+
 def _is_new(product: Product) -> bool:
     created_at = product.created_at
     if not created_at.tzinfo:
@@ -201,11 +250,29 @@ async def home(request: Request) -> HTMLResponse:
 async def catalog(
     request: Request,
     q: str = '',
-    category_id: Optional[int] = None,
-    min_price: Optional[int] = Query(default=None, ge=0),
-    max_price: Optional[int] = Query(default=None, ge=0),
+    category_id: str = '',
+    min_price: str = '',
+    max_price: str = '',
 ) -> HTMLResponse:
-    context = await _catalog_context(request, q, category_id, min_price, max_price)
+    parsed_category_id = _optional_nonnegative_int(category_id, 'Категория')
+    parsed_min_price = _optional_nonnegative_int(min_price, 'Цена от')
+    parsed_max_price = _optional_nonnegative_int(max_price, 'Цена до')
+    if (
+        parsed_min_price is not None
+        and parsed_max_price is not None
+        and parsed_min_price > parsed_max_price
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail='Цена от не может быть больше цены до',
+        )
+    context = await _catalog_context(
+        request,
+        q.strip(),
+        parsed_category_id,
+        parsed_min_price,
+        parsed_max_price,
+    )
     return templates.TemplateResponse(
         request=request,
         name='catalog.html',
@@ -301,11 +368,82 @@ async def order_page(request: Request, order_id: int) -> HTMLResponse:
 async def reviews_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
-        name='empty.html',
+        name='reviews.html',
+        context={'request': request},
+    )
+
+
+@router.get('/api/reviews', response_class=HTMLResponse)
+@transaction(1)
+async def reviews_fragment(request: Request, user: RequestUser) -> HTMLResponse:
+    reviews = list(
+        await Review.select()
+        .filter_by(status='published')
+        .order_by(Review.created_at.desc())
+        .all()
+    )[:50]
+    review_product_ids = {review.product_id for review in reviews}
+    review_user_ids = {review.user_id for review in reviews}
+    products_by_id = {
+        product.id: product
+        for product in (
+            await Product.select().where(col(Product.id).in_(review_product_ids)).all()
+            if review_product_ids
+            else []
+        )
+    }
+    users_by_id = {
+        review_user.id: review_user
+        for review_user in (
+            await User.select().where(col(User.id).in_(review_user_ids)).all()
+            if review_user_ids
+            else []
+        )
+    }
+
+    paid_orders = list(
+        await Order.select()
+        .filter_by(user_id=user.id, payment_status='paid')
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+    eligible_by_product: dict[int, tuple[Product, Order]] = {}
+    if paid_orders:
+        paid_order_ids = [order.id for order in paid_orders]
+        order_by_id = {order.id: order for order in paid_orders}
+        order_items = list(
+            await OrderItem.select()
+            .where(col(OrderItem.order_id).in_(paid_order_ids))
+            .all()
+        )
+        existing = list(await Review.select().filter_by(user_id=user.id).all())
+        reviewed_product_ids = {review.product_id for review in existing}
+        eligible_product_ids = {
+            item.product_id
+            for item in order_items
+            if item.product_id not in reviewed_product_ids
+        }
+        eligible_products = (
+            list(await Product.select().where(col(Product.id).in_(eligible_product_ids)).all())
+            if eligible_product_ids
+            else []
+        )
+        eligible_products_by_id = {product.id: product for product in eligible_products}
+        for item in order_items:
+            product = eligible_products_by_id.get(item.product_id)
+            order = order_by_id.get(item.order_id)
+            if product and order:
+                eligible_by_product.setdefault(product.id, (product, order))
+
+    return templates.TemplateResponse(
+        request=request,
+        name='_reviews_content.html',
         context={
             'request': request,
-            'title': 'Отзывы',
-            'message': 'Раздел отзывов готовится. Скоро здесь появятся отзывы покупателей.',
+            'reviews': reviews,
+            'products_by_id': products_by_id,
+            'users_by_id': users_by_id,
+            'eligible_items': list(eligible_by_product.values()),
         },
     )
 
@@ -402,6 +540,16 @@ async def cart_fragment(
         for item in items
         if item.product_id in products_by_id
     )
+    confirmations, missing_confirmations = await confirmed_cart_availability(user, items)
+    availability_requests = list(
+        await AvailabilityRequest.select()
+        .filter_by(user_id=user.id)
+        .order_by(AvailabilityRequest.created_at.desc(), AvailabilityRequest.id.desc())
+        .all()
+    )
+    latest_availability_by_product: dict[int, AvailabilityRequest] = {}
+    for availability in availability_requests:
+        latest_availability_by_product.setdefault(availability.product_id, availability)
     return templates.TemplateResponse(
         request=request,
         name='_cart_content.html',
@@ -411,19 +559,37 @@ async def cart_fragment(
             'products_by_id': products_by_id,
             'total': total,
             'user': user,
+            'confirmed_product_ids': set(confirmations),
+            'missing_confirmation_count': len(missing_confirmations),
+            'availability_by_product': latest_availability_by_product,
+            'has_pending_requests': any(
+                availability.status == 'pending'
+                for product_id, availability in latest_availability_by_product.items()
+                if product_id in products_by_id
+            ),
         },
     )
 
 
 @router.get('/api/profile', response_class=HTMLResponse)
+@transaction(1)
 async def profile_fragment(
     request: Request,
     user: RequestUser,
 ) -> HTMLResponse:
+    favorites_count = len(await Favorite.select().filter_by(user_id=user.id).all())
+    cart_items = list(await CartItem.select().filter_by(user_id=user.id).all())
+    orders_count = len(await Order.select().filter_by(user_id=user.id).all())
     return templates.TemplateResponse(
         request=request,
         name='_profile_content.html',
-        context={'request': request, 'user': user},
+        context={
+            'request': request,
+            'user': user,
+            'favorites_count': favorites_count,
+            'cart_quantity': sum(item.quantity for item in cart_items),
+            'orders_count': orders_count,
+        },
     )
 
 
@@ -450,6 +616,17 @@ async def orders_fragment(
     )
 
 
+@router.get('/api/shop-state', response_model=ShopStateResponse)
+@transaction(1)
+async def shop_state(user: RequestUser) -> ShopStateResponse:
+    favorites = list(await Favorite.select().filter_by(user_id=user.id).all())
+    cart_items = list(await CartItem.select().filter_by(user_id=user.id).all())
+    return ShopStateResponse(
+        favorite_product_ids=[favorite.product_id for favorite in favorites],
+        cart_quantity=sum(item.quantity for item in cart_items),
+    )
+
+
 @router.get('/api/orders/{order_id}', response_class=HTMLResponse)
 @transaction(1)
 async def order_fragment(
@@ -469,6 +646,7 @@ async def order_fragment(
             'order': order,
             'items': items,
             'status_labels': ORDER_STATUS_LABELS,
+            'payment_details': Config.payment_details,
         },
     )
 
@@ -485,6 +663,61 @@ async def update_profile(
     user.phone_number = request.phone_number
     user.updated_at = datetime.now()
     user.add()
+    return OkResponse(ok=True)
+
+
+@router.post('/api/reviews', response_model=OkResponse)
+@transaction(1)
+async def create_review(
+    request: CreateReviewRequest,
+    user: RequestUser,
+    bot: AppBot,
+) -> OkResponse:
+    existing = await Review.select().filter_by(
+        user_id=user.id,
+        product_id=request.product_id,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail='Вы уже оставляли отзыв на этот товар')
+
+    paid_orders = list(
+        await Order.select().filter_by(user_id=user.id, payment_status='paid').all()
+    )
+    if not paid_orders:
+        raise HTTPException(
+            status_code=403,
+            detail='Оставить отзыв можно после подтверждённой покупки',
+        )
+    paid_order_ids = [order.id for order in paid_orders]
+    order_item = await (
+        OrderItem.select()
+        .where(col(OrderItem.order_id).in_(paid_order_ids))
+        .where(OrderItem.product_id == request.product_id)
+        .first()
+    )
+    if not order_item:
+        raise HTTPException(
+            status_code=403,
+            detail='Этот товар отсутствует в ваших оплаченных заказах',
+        )
+    product = await Product.select().filter_by(id=request.product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail='Товар не найден')
+
+    review = Review(
+        user_id=user.id,
+        product_id=product.id,
+        order_id=order_item.order_id,
+        rating=request.rating,
+        text=request.text,
+    ).add()
+    await session_context.get().flush()
+    delivered = await notify_review_request(bot, review, product, user)
+    if not delivered:
+        raise HTTPException(
+            status_code=503,
+            detail='Админский чат временно недоступен. Попробуйте ещё раз позже',
+        )
     return OkResponse(ok=True)
 
 
@@ -619,6 +852,7 @@ async def request_availability(
     product_id: int,
     request: AvailabilityRequestBody,
     user: RequestUser,
+    bot: AppBot,
 ) -> AvailabilityResponse:
     product = await Product.select().filter_by(id=product_id, is_active=True).first()
     if not product:
@@ -640,6 +874,12 @@ async def request_availability(
             requested_quantity=request.quantity,
         ).add()
         await session_context.get().flush()
+    delivered = await notify_availability_request(bot, availability, product, user)
+    if not delivered:
+        raise HTTPException(
+            status_code=503,
+            detail='Админский чат временно недоступен. Попробуйте ещё раз позже',
+        )
     return AvailabilityResponse(request_id=availability.id, status=availability.status)
 
 
@@ -670,11 +910,19 @@ async def checkout(
 async def report_order_payment(
     order_id: int,
     user: RequestUser,
+    bot: AppBot,
 ) -> ReportPaymentResponse:
     order = await Order.select().filter_by(id=order_id, user_id=user.id).first()
     if not order:
         raise HTTPException(status_code=404, detail='Заказ не найден')
     changed = await report_payment(order)
+    if changed:
+        delivered = await notify_payment_review(bot, order, user)
+        if not delivered:
+            raise HTTPException(
+                status_code=503,
+                detail='Админский чат временно недоступен. Попробуйте ещё раз позже',
+            )
     return ReportPaymentResponse(ok=changed, status=order.status)
 
 

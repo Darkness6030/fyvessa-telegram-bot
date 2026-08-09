@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlmodel import col
 
 from src.models import (
+    AvailabilityRequest,
     CartItem,
     Category,
     CoinTransaction,
@@ -40,6 +41,40 @@ async def find_active_promo(code: str) -> PromoCode | None:
     )
 
 
+async def confirmed_cart_availability(
+    user: User,
+    items: list[CartItem] | None = None,
+) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
+    cart_items = items or list(await CartItem.select().filter_by(user_id=user.id).all())
+    if not cart_items:
+        return {}, []
+    product_ids = [item.product_id for item in cart_items]
+    requests = list(
+        await AvailabilityRequest.select()
+        .where(AvailabilityRequest.user_id == user.id)
+        .where(col(AvailabilityRequest.product_id).in_(product_ids))
+        .order_by(AvailabilityRequest.created_at.desc(), AvailabilityRequest.id.desc())
+        .all()
+    )
+    latest_by_product: dict[int, AvailabilityRequest] = {}
+    for availability in requests:
+        latest_by_product.setdefault(availability.product_id, availability)
+    confirmed: dict[int, AvailabilityRequest] = {}
+    missing: list[CartItem] = []
+    for item in cart_items:
+        availability = latest_by_product.get(item.product_id)
+        if (
+            availability
+            and availability.status == 'available'
+            and (availability.requested_quantity or 0) >= item.quantity
+            and (availability.available_quantity or 0) >= item.quantity
+        ):
+            confirmed[item.product_id] = availability
+        else:
+            missing.append(item)
+    return confirmed, missing
+
+
 async def create_order_from_cart(
     user: User,
     discount_mode: str,
@@ -55,6 +90,13 @@ async def create_order_from_cart(
     items = list(await CartItem.select().filter_by(user_id=user.id).all())
     if not items:
         raise HTTPException(status_code=409, detail='Корзина пуста')
+
+    confirmations, missing_confirmations = await confirmed_cart_availability(user, items)
+    if missing_confirmations:
+        raise HTTPException(
+            status_code=409,
+            detail='Сначала подтвердите наличие нужного количества всех товаров в корзине',
+        )
 
     products = list(
         await Product.select()
@@ -155,6 +197,9 @@ async def create_order_from_cart(
 
     for item in items:
         await item.delete()
+    for availability in confirmations.values():
+        availability.status = 'used'
+        availability.add()
     return order
 
 

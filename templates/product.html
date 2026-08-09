@@ -36,8 +36,8 @@
       <p class="mt-2 whitespace-pre-line text-sm leading-relaxed">{{ product.characteristics }}</p></div>
     {% endif %}
     <div class="mt-7 grid grid-cols-[1fr_auto] gap-2">
-      <button onclick="addToCart({{ product.id }})" class="rounded-2xl bg-ink px-5 py-4 font-black text-white">Добавить в корзину</button>
-      <button onclick="toggleFavorite({{ product.id }}, this)" class="grid h-14 w-14 place-items-center rounded-2xl border border-black/10 bg-white text-2xl">♡</button>
+      <button onclick="addToCart({{ product.id }}, 1, this)" class="rounded-2xl bg-ink px-5 py-4 font-black text-white">Добавить в корзину</button>
+      <button data-favorite-product-id="{{ product.id }}" onclick="toggleFavorite({{ product.id }}, this)" class="grid h-14 w-14 place-items-center rounded-2xl border border-black/10 bg-white text-2xl">♡</button>
     </div>
     <form data-availability-form data-product-id="{{ product.id }}" class="mt-2 flex gap-2">
       <label class="sr-only" for="availability-quantity">Количество</label>

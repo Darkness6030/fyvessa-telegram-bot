@@ -12,7 +12,7 @@
     <div class="flex items-end justify-between pt-2"><span class="font-bold">К оплате</span><strong class="text-3xl">{{ "%.0f"|format(order.paid_total) }} ₽</strong></div>
   </div>
   {% if order.status == 'awaiting_payment' %}
-  <div class="mt-6 rounded-2xl bg-cream p-4 text-sm"><strong>Оплата пока работает как заглушка.</strong><p class="mt-1 text-black/55">Нажмите кнопку ниже — заказ перейдёт администратору на ручную проверку.</p></div>
+  <div class="mt-6 rounded-2xl bg-cream p-4 text-sm"><strong>Реквизиты для оплаты</strong><p class="mt-1 whitespace-pre-line text-black/65">{{ payment_details }}</p><p class="mt-3 text-black/55">После перевода нажмите «Я оплатил». Администратор получит заказ в рабочем чате и проверит платёж.</p></div>
   <button onclick="reportPayment({{ order.id }}, this)" class="mt-3 w-full rounded-xl bg-ink py-4 font-black text-white disabled:opacity-50">Я оплатил</button>
   {% elif order.status == 'payment_review' %}<p class="mt-6 rounded-2xl bg-cream p-4 text-center font-bold">Администратор проверяет оплату</p>
   {% elif order.status == 'paid' %}<p class="mt-6 rounded-2xl bg-sage/20 p-4 text-center font-bold">Оплата подтверждена ✓</p>{% endif %}
