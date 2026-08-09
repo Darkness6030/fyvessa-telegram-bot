@@ -46,7 +46,7 @@ async def start(message: Message, command: CommandObject):
             referrer_id = referrer.id
 
     await User.get_or_create(
-        id=message.from_user.id,
+        user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
