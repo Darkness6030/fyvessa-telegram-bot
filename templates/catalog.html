@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_product_card.html" import product_card %}
+{% block title %}Каталог — Fyvessa{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-6xl px-4 pt-8">
+    <p class="text-xs font-black uppercase tracking-[.24em] text-coral">Весь магазин</p>
+    <h1 class="mt-2 text-4xl font-black tracking-[-.05em] sm:text-6xl">Каталог</h1>
+    <form action="/catalog" class="mt-7 grid gap-2 rounded-[1.5rem] bg-white p-3 shadow-soft sm:grid-cols-[1fr_180px_120px_120px_auto]">
+        <input name="q" value="{{ filters.q }}" placeholder="Название товара" class="rounded-xl bg-cream px-4 py-3 outline-none">
+        <select name="category_id" class="rounded-xl bg-cream px-3 py-3 outline-none">
+            <option value="">Все категории</option>
+            {% for category in categories %}<option value="{{ category.id }}" {% if filters.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
+        </select>
+        <input name="min_price" type="number" min="0" value="{{ filters.min_price or '' }}" placeholder="Цена от" class="rounded-xl bg-cream px-3 py-3 outline-none">
+        <input name="max_price" type="number" min="0" value="{{ filters.max_price or '' }}" placeholder="Цена до" class="rounded-xl bg-cream px-3 py-3 outline-none">
+        <button class="rounded-xl bg-ink px-5 py-3 font-bold text-white">Показать</button>
+    </form>
+</section>
+
+<section class="mx-auto max-w-6xl px-4 pt-8">
+    <div class="mb-5 flex items-center justify-between"><p class="font-bold">Найдено: {{ products|length }}</p></div>
+    {% if products %}
+    <div class="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-5">
+        {% for product in products %}{{ product_card(product, categories_by_id.get(product.category_id), is_new) }}{% endfor %}
+    </div>
+    {% else %}
+    <div class="rounded-[2rem] border border-dashed border-black/20 p-12 text-center"><p class="text-3xl">⌕</p><h2 class="mt-3 text-xl font-black">Ничего не нашли</h2><p class="mt-2 text-black/50">Попробуйте убрать часть фильтров.</p></div>
+    {% endif %}
+</section>
+{% endblock %}

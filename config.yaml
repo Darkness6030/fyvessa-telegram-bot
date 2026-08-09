@@ -1,0 +1,40 @@
+rewire:
+  log:
+    sinks:
+      - level: !env LOG_LEVEL:INFO
+rewire_fastapi:
+  server: "uvicorn"
+  app:
+    title: "Fyvessa Telegram Store"
+    version: "0.1.0"
+    docs_url: null
+    redoc_url: null
+  uvicorn:
+    host: "0.0.0.0"
+    port: !env "PORT:8080"
+  middleware:
+    cors:
+      allow_origins: [ ]
+      allow_methods: [ "GET", "POST" ]
+      allow_headers: [ "Authorization", "Content-Type" ]
+rewire_sqlmodel:
+  url: !pyexec return getenv("DATABASE_URL", "sqlite:///database.db").replace("sqlite://", "sqlite+aiosqlite://").replace("postgresql://", "postgresql+asyncpg://")
+  expire_on_commit: false
+  alembic:
+    generate: true
+    schema_migrations: true
+    env:
+      render_as_batch: true
+
+src:
+  bot:
+    token: !env "TELEGRAM_TOKEN:"
+  main_flow:
+    mini_app_url: !env "MINI_APP_URL:http://localhost:8080"
+    channel_url: !env "CHANNEL_URL:https://t.me/telegram"
+    support_username: !env "SUPPORT_USERNAME:telegram"
+  admin_flow:
+    admin_ids: !env "ADMIN_IDS:"
+    products_path: !env "PRODUCTS_PATH:assets/products.xlsx"
+  routes:
+    products_path: !env "PRODUCTS_PATH:assets/products.xlsx"

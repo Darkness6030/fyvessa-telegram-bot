@@ -1,0 +1,26 @@
+{% macro product_card(product, category, is_new) -%}
+<article class="group min-w-0">
+    <a href="/products/{{ product.sku }}" class="block">
+        <div class="relative aspect-[4/5] overflow-hidden rounded-[1.6rem] bg-sand shadow-soft">
+            {% if product.image_url %}
+            <img src="{{ product.image_url }}" alt="{{ product.name }}" class="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy">
+            {% else %}
+            <div class="product-placeholder flex h-full items-end p-5 text-3xl font-black tracking-tight text-white/90">{{ product.name[:1] }}</div>
+            {% endif %}
+            <div class="absolute left-3 top-3 flex flex-wrap gap-2">
+                {% if is_new(product) %}<span class="rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-wider">Новинка</span>{% endif %}
+                {% if product.discount_price %}<span class="rounded-full bg-coral px-3 py-1 text-[11px] font-black uppercase tracking-wider text-white">Скидка</span>{% endif %}
+            </div>
+            <button type="button" onclick="event.preventDefault(); toggleFavorite({{ product.id }}, this)" class="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-xl shadow">♡</button>
+        </div>
+        <div class="px-1 pt-3">
+            <p class="text-xs font-semibold uppercase tracking-wider text-black/45">{{ category.name if category else 'Каталог' }}</p>
+            <h3 class="mt-1 truncate text-base font-bold">{{ product.name }}</h3>
+            <div class="mt-1 flex items-center gap-2">
+                <span class="font-black">{{ "%.0f"|format(product.current_price) }} ₽</span>
+                {% if product.discount_price %}<span class="text-sm text-black/35 line-through">{{ "%.0f"|format(product.retail_price) }} ₽</span>{% endif %}
+            </div>
+        </div>
+    </a>
+</article>
+{%- endmacro %}

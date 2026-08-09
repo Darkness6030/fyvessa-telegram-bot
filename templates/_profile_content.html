@@ -1,0 +1,10 @@
+<form id="profile-form" class="space-y-4 rounded-[2rem] bg-white p-6 shadow-soft">
+    <label class="block"><span class="text-sm font-bold">Имя</span><input name="first_name" required value="{{ customer.first_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+    <label class="block"><span class="text-sm font-bold">Фамилия</span><input name="last_name" required value="{{ customer.last_name or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+    <label class="block"><span class="text-sm font-bold">Дата рождения</span><input name="birth_date" required type="date" value="{{ customer.birth_date or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+    <label class="block"><span class="text-sm font-bold">Номер телефона</span><input name="phone_number" required type="tel" value="{{ customer.phone_number or '' }}" class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none"></label>
+    <div class="rounded-xl bg-cream px-4 py-3 text-sm text-black/55">
+        Клиент №{{ "%06d"|format(customer.id) }} · @{{ customer.username or 'без username' }} · Telegram ID {{ customer.user_id }}
+    </div>
+    <button class="w-full rounded-xl bg-ink py-4 font-black text-white">Сохранить</button>
+</form>

@@ -1,0 +1,20 @@
+:root {
+    color-scheme: light;
+    --tg-bg: var(--tg-theme-bg-color, #f5f1e8);
+}
+
+html { scroll-behavior: smooth; }
+body { background: var(--tg-bg); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+.hero-grid {
+    background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+}
+.hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
+.product-placeholder { background: linear-gradient(145deg, #8ea58c, #415947 58%, #171714); }
+button, a { -webkit-tap-highlight-color: transparent; }
+@media (display-mode: standalone) {
+    body { padding-bottom: env(safe-area-inset-bottom); }
+}

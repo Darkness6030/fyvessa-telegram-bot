@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_product_card.html" import product_card %}
+{% block title %}Fyvessa — магазин в Telegram{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-6xl px-4 pt-6 sm:pt-10">
+    <div class="hero-grid relative overflow-hidden rounded-[2rem] bg-ink px-6 py-10 text-white sm:px-12 sm:py-16">
+        <div class="relative z-10 max-w-xl">
+            <p class="mb-5 text-xs font-black uppercase tracking-[.28em] text-white/55">Коллекция недели</p>
+            <h1 class="text-4xl font-black leading-[.95] tracking-[-.055em] sm:text-7xl">Нужное.<br><span class="text-coral">Без лишнего.</span></h1>
+            <p class="mt-6 max-w-md text-base leading-relaxed text-white/65">Оригинальные товары, живая проверка наличия и оформление прямо внутри Telegram.</p>
+            <a href="/catalog" class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink">Смотреть каталог →</a>
+        </div>
+        <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
+    </div>
+</section>
+
+<section class="mx-auto max-w-6xl px-4 pt-10">
+    <form action="/catalog" class="flex gap-2 rounded-2xl bg-white p-2 shadow-soft">
+        <input name="q" aria-label="Поиск" placeholder="Что ищем?" class="min-w-0 flex-1 bg-transparent px-4 py-3 outline-none placeholder:text-black/35">
+        <button class="rounded-xl bg-ink px-5 font-bold text-white">Найти</button>
+    </form>
+    <div class="no-scrollbar mt-5 flex gap-2 overflow-x-auto pb-2">
+        {% for category in categories %}
+        <a href="/catalog?category_id={{ category.id }}" class="whitespace-nowrap rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold">{{ category.name }}</a>
+        {% endfor %}
+    </div>
+</section>
+
+{% set sections = [('Популярное', popular), ('Только появилось', new_products), ('Выбрано для вас', recommended)] %}
+{% for section_title, section_products in sections %}
+{% if section_products %}
+<section class="mx-auto max-w-6xl px-4 pt-12">
+    <div class="mb-5 flex items-end justify-between">
+        <h2 class="text-2xl font-black tracking-tight sm:text-3xl">{{ section_title }}</h2>
+        <a href="/catalog" class="text-sm font-bold text-black/50">Все товары →</a>
+    </div>
+    <div class="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-6">
+        {% for product in section_products %}
+        {{ product_card(product, categories_by_id.get(product.category_id), is_new) }}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% endfor %}
+
+{% if not products %}
+<section class="mx-auto max-w-2xl px-4 py-20 text-center">
+    <div class="rounded-[2rem] border border-dashed border-black/20 p-10">
+        <p class="text-4xl">📦</p><h2 class="mt-4 text-2xl font-black">Каталог пока пуст</h2>
+        <p class="mt-2 text-black/50">Администратору нужно заполнить assets/products.xlsx и выполнить /sync_products.</p>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
