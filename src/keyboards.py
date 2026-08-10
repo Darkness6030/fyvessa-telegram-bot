@@ -7,6 +7,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def inline_keyboard(buttons: list[tuple[str, Any]], *layout: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for text, action in buttons:
+        if action is None or action == '':
+            continue
+
         if isinstance(action, WebAppInfo):
             builder.button(text=text, web_app=action)
         elif isinstance(action, str):

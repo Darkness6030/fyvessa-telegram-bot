@@ -21,22 +21,22 @@
         }
     }
   </script>
-  <link href="/static/app.css?v=20260809-4" rel="stylesheet">
+  <link href="/static/app.css?v=20260811-1" rel="stylesheet">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-    <a class="text-xl font-black tracking-[-0.06em]" href="/">FYVESSA<span class="text-coral">.</span></a>
-    <nav class="flex items-center gap-1 text-sm font-semibold">
-      <a class="rounded-full px-3 py-2 hover:bg-white" href="/catalog">Каталог</a>
-      <a aria-label="Избранное" class="rounded-full px-3 py-2 hover:bg-white" href="/favorites">♡</a>
-      <a aria-label="Профиль" class="rounded-full px-3 py-2 hover:bg-white" href="/profile">◉</a>
-      <a aria-label="Корзина" class="rounded-full bg-ink px-3 py-2 text-white" href="/cart" id="cart-link">Корзина <span class="hidden rounded-full bg-coral px-1.5 py-0.5 text-xs" data-cart-count>0</span></a>
+    <a class="text-xl font-black tracking-[-0.06em]" data-nav href="/">FYVESSA<span class="text-coral">.</span></a>
+    <nav class="flex items-center gap-1 text-sm font-semibold" data-main-nav>
+      <a class="nav-link rounded-full px-3 py-2" data-nav href="/catalog">Каталог</a>
+      <a aria-label="Избранное" class="nav-link grid h-10 w-10 place-items-center rounded-full text-xl" data-nav href="/favorites">♡</a>
+      <a aria-label="Профиль" class="nav-link grid h-10 w-10 place-items-center rounded-full" data-nav href="/profile">◉</a>
+      <a aria-label="Корзина" class="rounded-full bg-ink px-3 py-2 text-white" data-nav href="/cart" id="cart-link">Корзина <span class="hidden rounded-full bg-coral px-1.5 py-0.5 text-xs" data-cart-count>0</span></a>
     </nav>
   </div>
 </header>
 
-<main>{% block content %}{% endblock %}</main>
+<main id="app-content">{% block content %}{% endblock %}</main>
 
 <footer class="mx-auto mt-16 max-w-6xl border-t border-black/10 px-4 py-8 text-sm text-black/50">
   <div class="flex items-center justify-between">
@@ -44,8 +44,8 @@
     <a class="font-semibold text-ink" href="/recent">Недавно смотрели</a>
   </div>
 </footer>
-<div class="pointer-events-none fixed bottom-5 left-1/2 z-50 hidden -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft" id="toast"></div>
-<script src="/static/app.js?v=20260809-4"></script>
+<div aria-live="polite" class="toast pointer-events-none fixed bottom-5 left-1/2 z-50 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft" id="toast" role="status"></div>
+<script src="/static/app.js?v=20260811-1"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

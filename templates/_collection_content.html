@@ -1,6 +1,6 @@
 {% from "_product_card.html" import product_card %}
 {% if products %}
-<div class="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-5">
+<div class="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-5" data-product-grid>
   {% for product in products %}{{ product_card(product, categories_by_id.get(product.category_id), is_new) }}{% endfor %}
 </div>
 {% else %}

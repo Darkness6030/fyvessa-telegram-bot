@@ -1,5 +1,5 @@
 {% macro product_card(product, category, is_new) -%}
-<article class="group relative min-w-0">
+<article class="group relative min-w-0" data-product-card-id="{{ product.id }}">
   <a class="block" href="/products/{{ product.sku }}">
     <div class="relative aspect-[4/5] overflow-hidden rounded-[1.6rem] bg-sand shadow-soft">
       {% if product.image_url %}

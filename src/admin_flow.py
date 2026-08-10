@@ -26,6 +26,7 @@ from src.models import (
     User,
 )
 from src.orders import cancel_order, confirm_payment, ORDER_STATUS_LABELS
+from src.settings import SettingsValidationError, sync_settings
 
 
 @config
@@ -190,7 +191,7 @@ def _admin_keyboard():
             ('👥 Пользователи', 'users'),
             ('🎟 Промокоды', 'promos'),
             ('📊 Сводка', 'summary'),
-            ('🔄 Синхронизировать товары', 'sync'),
+            ('🔄 Синхронизировать таблицу', 'sync'),
             ('❓ Команды и подсказки', 'help'),
         )
     ])
@@ -294,14 +295,15 @@ async def admin_menu(message: Message, state: FSMContext):
 async def _sync_text() -> str:
     try:
         report = await sync_catalog()
-    except CatalogValidationError as exc:
+        await sync_settings()
+    except (CatalogValidationError, SettingsValidationError) as exc:
         return (
             '❌ <b>Google Sheets не синхронизирован</b>\n'
             f'<pre>{html.escape(str(exc))}</pre>'
         )
 
     return (
-        '✅ <b>Каталог синхронизирован</b>\n\n'
+        '✅ <b>Каталог и настройки синхронизированы</b>\n\n'
         f'Создано товаров: {report.products_created}\n'
         f'Обновлено товаров: {report.products_updated}\n'
         f'Скрыто товаров: {report.products_hidden}\n'
@@ -395,9 +397,7 @@ def _order_text(order: Order, user: Optional[User] = None) -> str:
     )
 
 
-def _order_keyboard(
-    order: Order, *, user_id: int = 0, page: int = 0, total: int = 1,
-):
+def _order_keyboard(order: Order, user_id: int = 0, page: int = 0, total: int = 1):
     buttons = []
     if order.status == 'payment_review':
         buttons.append((
@@ -446,16 +446,10 @@ async def _availability_text(availability: AvailabilityRequest) -> str:
     return details
 
 
-def _availability_admin_keyboard(
-    availability: AvailabilityRequest, *, user_id: int = 0, page: int = 0,
-    total: int = 1,
-):
+def _availability_admin_keyboard(availability: AvailabilityRequest, user_id: int = 0, page: int = 0, total: int = 1):
     buttons = (
         [
-            (
-                text,
-                AvailabilityActionCallback(request_id=availability.id, status=status),
-            )
+            (text, AvailabilityActionCallback(request_id=availability.id, status=status))
             for text, status in (
             ('✅ Есть', 'available'),
             ('❌ Нет', 'unavailable'),

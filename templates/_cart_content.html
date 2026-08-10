@@ -2,7 +2,7 @@
 <div class="space-y-3" data-cart-pending="{{ 'true' if has_pending_requests else 'false' }}">
   {% for item in items %}{% set product = products_by_id.get(item.product_id) %}{% if product %}
   {% set availability = availability_by_product.get(product.id) %}
-  <article class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft" data-cart-item>
+  <article class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft" data-cart-item data-product-id="{{ product.id }}" data-unit-price="{{ product.current_price }}">
     <a class="h-24 w-20 overflow-hidden rounded-2xl bg-sand" href="/products/{{ product.sku }}">{% if product.image_url %}<img alt="" class="h-full w-full object-cover" src="{{ product.image_url }}">{% endif %}</a>
     <div class="min-w-0 flex-1"><h2 class="truncate font-black">{{ product.name }}</h2>
       <p class="mt-1 text-sm text-black/50">{{ "%.0f"|format(product.current_price) }} ₽ за шт.</p>
@@ -10,7 +10,7 @@
         <button class="grid h-8 w-8 place-items-center rounded-full bg-cream font-black" onclick="changeCartQuantity({{ product.id }}, -1, this)" type="button">−</button>
         <input aria-label="Количество" class="w-8 bg-transparent text-center font-black" data-cart-quantity readonly value="{{ item.quantity }}">
         <button class="grid h-8 w-8 place-items-center rounded-full bg-cream font-black" onclick="changeCartQuantity({{ product.id }}, 1, this)" type="button">+</button>
-        <strong class="ml-auto">{{ "%.0f"|format(product.current_price * item.quantity) }} ₽</strong>
+        <strong class="ml-auto" data-cart-line-total>{{ "%.0f"|format(product.current_price * item.quantity) }} ₽</strong>
       </div>
       <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
         {% if product.id in confirmed_product_ids %}
@@ -27,12 +27,12 @@
         {% endif %}
       </div>
     </div>
-    <button class="rounded-full px-3 py-2 text-black/35" onclick="removeFromCart({{ product.id }})">✕</button>
+    <button aria-label="Удалить товар" class="rounded-full px-3 py-2 text-black/35" onclick="removeFromCart({{ product.id }}, this)" type="button">✕</button>
   </article>
   {% endif %}{% endfor %}
 </div>
 <form class="mt-6 rounded-[1.5rem] bg-ink p-6 text-white" id="checkout-form">
-  <div class="flex items-end justify-between"><span class="text-white/55">Итого</span><strong class="text-3xl">{{ "%.0f"|format(total) }} ₽</strong></div>
+  <div class="flex items-end justify-between"><span class="text-white/55">Итого</span><strong class="text-3xl" data-cart-total>{{ "%.0f"|format(total) }} ₽</strong></div>
   <div class="mt-5 space-y-3">
     <label class="block text-sm"><span class="text-white/65">Скидка</span>
       <select class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" name="discount_mode">

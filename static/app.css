@@ -1,10 +1,11 @@
 :root {
     color-scheme: light;
     --tg-bg: var(--tg-theme-bg-color, #f5f1e8);
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
 }
 
 html { scroll-behavior: smooth; }
-body { background: var(--tg-bg); }
+body { background: var(--tg-bg); overflow-x: hidden; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 .hero-grid {
@@ -14,7 +15,98 @@ body { background: var(--tg-bg); }
 }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
 .product-placeholder { background: linear-gradient(145deg, #8ea58c, #415947 58%, #171714); }
-button, a { -webkit-tap-highlight-color: transparent; }
+button, a, input, select { -webkit-tap-highlight-color: transparent; }
+button, a { transition: transform .2s var(--ease-out), opacity .2s ease, background-color .2s ease, color .2s ease, border-color .2s ease; }
+button:active, a:active { transform: scale(.975); }
+button:disabled { cursor: wait; }
+input, select { transition: box-shadow .2s ease, background-color .2s ease, border-color .2s ease; }
+input:focus, select:focus { box-shadow: 0 0 0 3px rgba(237,105,75,.16); }
+.nav-link:hover, .nav-link[aria-current="page"] { background: white; }
+.nav-link[aria-current="page"] { color: #ed694b; }
+
+main { min-height: 55vh; transition: opacity .18s ease, transform .24s var(--ease-out); }
+body.is-navigating main { opacity: .55; transform: translateY(3px); pointer-events: none; }
+.page-enter { animation: page-in .38s var(--ease-out) both; }
+
+[data-auth-fragment] { transition: opacity .2s ease; }
+[data-auth-fragment].is-refreshing { opacity: .62; pointer-events: none; }
+.fragment-skeleton { overflow: hidden; position: relative; }
+.fragment-skeleton::after {
+    animation: shimmer 1.25s infinite;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.8), transparent);
+    content: '';
+    inset: 0;
+    position: absolute;
+    transform: translateX(-100%);
+}
+
+.toast {
+    max-width: min(90vw, 30rem);
+    opacity: 0;
+    text-align: center;
+    transform: translate(-50%, 1rem) scale(.96);
+    transition: opacity .22s ease, transform .3s var(--ease-out);
+    visibility: hidden;
+}
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0) scale(1); visibility: visible; }
+
+.profile-hero { isolation: isolate; }
+.profile-glow { filter: blur(10px); opacity: .32; }
+.profile-link {
+    align-items: center;
+    border-radius: 1rem;
+    display: flex;
+    gap: .75rem;
+    padding: .75rem;
+}
+.profile-link:hover { background: #f5f1e8; }
+.profile-link-icon {
+    align-items: center;
+    border-radius: .9rem;
+    display: flex;
+    flex: 0 0 auto;
+    font-weight: 900;
+    height: 2.75rem;
+    justify-content: center;
+    width: 2.75rem;
+}
+.profile-field { display: block; }
+.profile-field > span { display: block; font-size: .8rem; font-weight: 800; margin-bottom: .45rem; }
+.profile-field input {
+    background: #f5f1e8;
+    border: 1px solid transparent;
+    border-radius: .9rem;
+    outline: none;
+    padding: .85rem 1rem;
+    width: 100%;
+}
+.profile-field input:focus { background: white; border-color: rgba(237,105,75,.35); }
+.profile-save-status { transition: color .2s ease, opacity .2s ease; }
+.profile-save-status.is-dirty { color: #ed694b; }
+.profile-save-status.is-saved { color: #557258; }
+
+[data-product-card-id].is-removing, [data-cart-item].is-removing {
+    opacity: 0;
+    transform: scale(.96);
+    transition: opacity .2s ease, transform .25s var(--ease-out);
+}
+[data-favorite-product-id].is-active { animation: heart-pop .32s var(--ease-out); }
+
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { to { transform: translateX(100%); } }
+@keyframes heart-pop { 50% { transform: scale(1.28); } }
+
+@view-transition { navigation: auto; }
+::view-transition-old(root) { animation: .16s ease both fade-out; }
+::view-transition-new(root) { animation: .3s var(--ease-out) both fade-in; }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+
 @media (display-mode: standalone) {
     body { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

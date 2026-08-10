@@ -23,9 +23,14 @@ plugin = simple_plugin()
 
 @plugin.setup()
 async def create_bot() -> Bot:
-    session = AiohttpSession(api=TelegramAPIServer.from_base(Config.api_url), limit=1024) \
-        if Config.api_url \
+    session = (
+        AiohttpSession(
+            api=TelegramAPIServer.from_base(Config.api_url),
+            limit=1024,
+        )
+        if Config.api_url
         else AiohttpSession(limit=1024)
+    )
 
     return Bot(
         token=Config.token,
@@ -42,7 +47,7 @@ async def create_dispatcher() -> Dispatcher:
 
 
 @plugin.run()
-async def run_bot(bot: Bot, dispatcher: Dispatcher):
+async def run_bot(bot: Bot, dispatcher: Dispatcher) -> None:
     await dispatcher.start_polling(bot)
 
 
@@ -51,7 +56,7 @@ async def send_message(user_id: int, message_text: str, **kwargs) -> bool:
         await get_bot().send_message(user_id, message_text, **kwargs)
         return True
     except TelegramAPIError as exc:
-        logger.error(f'Failed to send message to {user_id}: {exc}')
+        logger.error('Failed to send message to {}: {}', user_id, exc)
         return False
 
 

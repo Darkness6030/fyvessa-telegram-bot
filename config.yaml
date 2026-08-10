@@ -4,14 +4,9 @@ src:
     api_url: !env "TELEGRAM_API_URL:"
   main_flow:
     mini_app_url: !env "MINI_APP_URL:"
-    channel_url: !env "CHANNEL_URL:"
-    reviews_channel_url: !env "REVIEWS_CHANNEL_URL:"
-    support_username: !env "SUPPORT_USERNAME:"
   admin_flow:
     admin_chat_id: !env "ADMIN_CHAT_ID:"
     mini_app_url: !env "MINI_APP_URL:"
-  routes:
-    payment_details: !env "PAYMENT_DETAILS:"
 rewire:
   log:
     sinks:

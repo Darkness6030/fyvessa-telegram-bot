@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Профиль — Fyvessa{% endblock %}
 {% block content %}
-<section class="mx-auto max-w-xl px-4 pt-8">
-  <h1 class="text-4xl font-black tracking-[-.05em] sm:text-6xl">Профиль</h1>
-  <p class="mt-2 text-black/50">Имя и фамилия подставлены из Telegram — их можно изменить.</p>
-  <div aria-live="polite" class="mt-8" data-auth-fragment="/api/profile"></div>
+<section class="mx-auto max-w-5xl px-4 pt-6 sm:pt-10">
+  <p class="text-xs font-black uppercase tracking-[.24em] text-coral">Личное пространство</p>
+  <h1 class="mt-2 text-4xl font-black tracking-[-.05em] sm:text-6xl">Профиль</h1>
+  <p class="mt-2 max-w-xl text-black/50">Данные для оформления, покупки и всё важное — в одном месте.</p>
+  <div aria-live="polite" class="mt-7" data-auth-fragment="/api/profile"></div>
 </section>
 {% endblock %}

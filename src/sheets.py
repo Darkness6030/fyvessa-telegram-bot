@@ -6,9 +6,15 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
+from urllib.parse import urlsplit
 
 import gspread
-from gspread.utils import (a1_range_to_grid_range, ValidationConditionType, ValueInputOption, ValueRenderOption)
+from gspread.utils import (
+    ValidationConditionType,
+    ValueInputOption,
+    ValueRenderOption,
+    a1_range_to_grid_range,
+)
 
 from src.catalog import (
     CatalogRow,
@@ -17,6 +23,7 @@ from src.catalog import (
     CategoryRow,
     OwnerRow,
 )
+from src.settings import SettingsValidationError, StoreSettings
 
 SPREADSHEET_TITLE = 'Fyvessa Admin'
 CREDENTIALS_PATH = Path('assets/credentials.json')
@@ -83,6 +90,32 @@ OWNERS = SheetSpec(
     },
     checkbox_fields=('is_active',),
 )
+SETTINGS = SheetSpec(
+    title='settings',
+    columns=('key', 'value', 'description'),
+    aliases={
+        'ключ': 'key',
+        'значение': 'value',
+        'описание': 'description',
+    },
+)
+
+SETTING_DESCRIPTIONS = {
+    'channel_url': 'Ссылка на основной Telegram-канал',
+    'reviews_channel_url': 'Ссылка на Telegram-канал с отзывами',
+    'support_url': 'Ссылка на поддержку или @username',
+    'payment_details': 'Реквизиты для оплаты (можно в несколько строк)',
+}
+SETTING_ALIASES = {
+    'основной канал': 'channel_url',
+    'канал': 'channel_url',
+    'отзывы': 'reviews_channel_url',
+    'канал отзывов': 'reviews_channel_url',
+    'поддержка': 'support_url',
+    'support_username': 'support_url',
+    'реквизиты': 'payment_details',
+    'реквизиты для оплаты': 'payment_details',
+}
 
 T = TypeVar('T')
 
@@ -242,6 +275,80 @@ def _unique(value: str, seen: set[str]) -> str:
 
     seen.add(candidate.casefold())
     return candidate
+
+
+def _setting_key(value: Any) -> str:
+    canonical, alias = _header_key(value)
+    return SETTING_ALIASES.get(alias, canonical)
+
+
+def _normalize_link(value: Any) -> str:
+    link = str(value or '').strip()
+    if not link:
+        return ''
+
+    if link.startswith('@'):
+        link = f'https://t.me/{link[1:]}'
+    elif re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{4,31}', link):
+        link = f'https://t.me/{link}'
+    elif link.casefold().startswith(('t.me/', 'telegram.me/', 'www.')):
+        link = f'https://{link}'
+
+    parsed = urlsplit(link)
+    if (
+        parsed.scheme not in {'http', 'https'}
+        or not parsed.hostname
+        or re.search(r'\s', link)
+    ):
+        return ''
+
+    return link.rstrip('/')
+
+
+def _normalize_settings(
+    values: list[list[Any]],
+) -> tuple[StoreSettings, list[CellUpdate]]:
+    columns, updates = _columns(values, SETTINGS)
+    setting_values: dict[str, str] = {}
+
+    for row_number, values_row in enumerate(values[1:], start=2):
+        if not _has_values(values_row):
+            continue
+
+        raw = _raw_row(values_row, columns)
+        key = _setting_key(raw['key'])
+        if key not in SETTING_DESCRIPTIONS or key in setting_values:
+            continue
+
+        value = str(raw['value'] or '').strip()
+        if key.endswith('_url'):
+            value = _normalize_link(value)
+
+        normalized = {
+            'key': key,
+            'value': value,
+            'description': SETTING_DESCRIPTIONS[key],
+        }
+        setting_values[key] = value
+        updates.extend(_row_updates(row_number, raw, normalized, columns))
+
+    next_row = max(len(values) + 1, 2)
+    for key, description in SETTING_DESCRIPTIONS.items():
+        if key in setting_values:
+            continue
+
+        setting_values[key] = ''
+        updates.extend(
+            CellUpdate(next_row, columns[field], value)
+            for field, value in (
+                ('key', key),
+                ('value', ''),
+                ('description', description),
+            )
+        )
+        next_row += 1
+
+    return StoreSettings.model_validate(setting_values), updates
 
 
 def _normalize_sku(value: Any, name: str, category: str) -> str:
@@ -621,6 +728,9 @@ def _load_catalog() -> CatalogSource:
             'with the service account',
         ) from exc
 
+    except CatalogValidationError:
+        raise
+
     except Exception as exc:
         raise CatalogValidationError(
             f'Google Sheets catalog could not be loaded: {exc}',
@@ -629,3 +739,36 @@ def _load_catalog() -> CatalogSource:
 
 async def load_catalog_source() -> CatalogSource:
     return await asyncio.to_thread(_load_catalog)
+
+
+def _load_store_settings() -> StoreSettings:
+    if not CREDENTIALS_PATH.is_file():
+        raise SettingsValidationError(
+            f'Google credentials file not found: {CREDENTIALS_PATH}',
+        )
+
+    try:
+        client = gspread.service_account(filename=str(CREDENTIALS_PATH))
+        spreadsheet = client.open(SPREADSHEET_TITLE)
+        worksheet = _worksheet(spreadsheet, SETTINGS)
+        values = worksheet.get_all_values(
+            value_render_option=ValueRenderOption.unformatted,
+        )
+        settings, updates = _normalize_settings(values)
+        _write(worksheet, updates)
+        return settings
+    except gspread.SpreadsheetNotFound as exc:
+        raise SettingsValidationError(
+            f'Google spreadsheet {SPREADSHEET_TITLE!r} was not found or not shared '
+            'with the service account',
+        ) from exc
+    except SettingsValidationError:
+        raise
+    except Exception as exc:
+        raise SettingsValidationError(
+            f'Google Sheets settings could not be loaded: {exc}',
+        ) from exc
+
+
+async def load_store_settings() -> StoreSettings:
+    return await asyncio.to_thread(_load_store_settings)

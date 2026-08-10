@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
-from rewire import config, simple_plugin
+from rewire import simple_plugin
 from rewire_sqlmodel import session_context, transaction
 
 from src.admin_flow import (
@@ -28,12 +28,7 @@ from src.models import (
     User,
 )
 from src.orders import (confirmed_cart_availability, create_order_from_cart, ORDER_STATUS_LABELS, report_payment)
-
-
-@config
-class Config(BaseModel):
-    payment_details: str = 'Реквизиты для оплаты уточните в чате поддержки'
-
+from src.settings import get_settings
 
 plugin = simple_plugin()
 router = APIRouter()
@@ -355,18 +350,16 @@ async def recent_fragment(request: Request, user: RequestUser) -> HTMLResponse:
     products_by_id = (
         {
             product.id: product
-            for product in (
-            await Product.get_by_ids([view.product_id for view in views])
-        )
-        }
-        if views
-        else {}
+            for product in await Product.get_by_ids([view.product_id for view in views])
+        } if views else {}
     )
+
     products = [
         products_by_id[view.product_id]
         for view in views
         if view.product_id in products_by_id
     ]
+
     categories = await Category.get_all()
     return templates.TemplateResponse(
         request=request,
@@ -383,40 +376,41 @@ async def recent_fragment(request: Request, user: RequestUser) -> HTMLResponse:
 @router.get('/api/cart', response_class=HTMLResponse)
 @transaction(1)
 async def cart_fragment(request: Request, user: RequestUser) -> HTMLResponse:
-    items = await CartItem.get_for_user(user.id)
+    cart_items = await CartItem.get_for_user(user.id)
     products_by_id = (
         {
             product.id: product
-            for product in (
-            await Product.get_by_ids([item.product_id for item in items])
-        )
+            for product in await Product.get_by_ids([cart_item.product_id for cart_item in cart_items])
         }
-        if items
-        else {}
+        if cart_items else {}
     )
+
     total = sum(
-        products_by_id[item.product_id].current_price * item.quantity
-        for item in items
-        if item.product_id in products_by_id
+        products_by_id[cart_item.product_id].current_price * cart_item.quantity
+        for cart_item in cart_items
+        if cart_item.product_id in products_by_id
     )
-    confirmations, missing_confirmations = await confirmed_cart_availability(user, items)
+
+    confirmations, missing_items = await confirmed_cart_availability(user, cart_items)
     availability_requests = await AvailabilityRequest.get_latest_for_products(
-        user.id, [item.product_id for item in items],
+        user.id, [cart_item.product_id for cart_item in cart_items],
     )
+
     latest_availability_by_product: dict[int, AvailabilityRequest] = {}
     for availability in availability_requests:
         latest_availability_by_product.setdefault(availability.product_id, availability)
+
     return templates.TemplateResponse(
         request=request,
         name='_cart_content.html',
         context={
             'request': request,
-            'items': items,
+            'items': cart_items,
             'products_by_id': products_by_id,
             'total': total,
             'user': user,
             'confirmed_product_ids': set(confirmations),
-            'missing_confirmation_count': len(missing_confirmations),
+            'missing_confirmation_count': len(missing_items),
             'availability_by_product': latest_availability_by_product,
             'has_pending_requests': any(
                 availability.status == 'pending'
@@ -440,8 +434,10 @@ async def profile_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'request': request,
             'user': user,
             'favorites_count': favorites_count,
-            'cart_quantity': sum(item.quantity for item in cart_items),
+            'cart_quantity': sum(cart_item.quantity for cart_item in cart_items),
             'orders_count': orders_count,
+            'support_url': get_settings().support_url,
+            'today': date.today().isoformat(),
         },
     )
 
@@ -468,7 +464,7 @@ async def shop_state(user: RequestUser) -> ShopStateResponse:
     cart_items = await CartItem.get_for_user(user.id)
     return ShopStateResponse(
         favorite_product_ids=[favorite.product_id for favorite in favorites],
-        cart_quantity=sum(item.quantity for item in cart_items),
+        cart_quantity=sum(cart_item.quantity for cart_item in cart_items),
     )
 
 
@@ -478,16 +474,17 @@ async def order_fragment(request: Request, order_id: int, user: RequestUser) -> 
     order = await Order.get_by_id(order_id, user.id)
     if not order:
         raise HTTPException(status_code=404, detail='Заказ не найден')
-    items = await OrderItem.get_for_order(order.id)
+
+    cart_items = await OrderItem.get_for_order(order.id)
     return templates.TemplateResponse(
         request=request,
         name='_order_content.html',
         context={
             'request': request,
             'order': order,
-            'items': items,
+            'items': cart_items,
             'status_labels': ORDER_STATUS_LABELS,
-            'payment_details': Config.payment_details,
+            'payment_details': get_settings().payment_details,
         },
     )
 
@@ -555,42 +552,44 @@ async def add_to_cart(product_id: int, request: AddToCartRequest, user: RequestU
     if not product:
         raise HTTPException(status_code=404, detail='Product not found')
 
-    item = await CartItem.get_for_product(user.id, product_id)
-
-    if not item:
-        item = CartItem(
+    cart_item = await CartItem.get_for_product(user.id, product_id)
+    if not cart_item:
+        cart_item = CartItem(
             user_id=user.id,
             product_id=product_id,
             quantity=request.quantity,
         ).add()
     else:
-        item.quantity = min(item.quantity + request.quantity, 999)
-        item.updated_at = datetime.now()
-        item.add()
+        cart_item.quantity = min(cart_item.quantity + request.quantity, 999)
+        cart_item.updated_at = datetime.now()
+        cart_item.add()
 
     product.cart_additions_count += 1
     product.add()
-    return AddToCartResponse(quantity=item.quantity)
+    return AddToCartResponse(quantity=cart_item.quantity)
 
 
 @router.put('/api/cart/{product_id}', response_model=AddToCartResponse)
 @transaction(1)
 async def set_cart_quantity(product_id: int, request: SetCartQuantityRequest, user: RequestUser) -> AddToCartResponse:
-    item = await CartItem.get_for_product(user.id, product_id)
-    if not item:
+    cart_item = await CartItem.get_for_product(user.id, product_id)
+    if not cart_item:
         raise HTTPException(status_code=404, detail='Товар отсутствует в корзине')
-    item.quantity = request.quantity
-    item.updated_at = datetime.now()
-    item.add()
-    return AddToCartResponse(quantity=item.quantity)
+
+    cart_item.quantity = request.quantity
+    cart_item.updated_at = datetime.now()
+    cart_item.add()
+
+    return AddToCartResponse(quantity=cart_item.quantity)
 
 
 @router.delete('/api/cart/{product_id}', response_model=OkResponse)
 @transaction(1)
 async def remove_from_cart(product_id: int, user: RequestUser) -> OkResponse:
-    item = await CartItem.get_for_product(user.id, product_id)
-    if item:
-        await item.delete()
+    cart_item = await CartItem.get_for_product(user.id, product_id)
+    if cart_item:
+        await cart_item.delete()
+
     return OkResponse(ok=True)
 
 

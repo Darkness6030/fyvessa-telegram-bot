@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ product.name }} — Fyvessa{% endblock %}
 {% block content %}
-<section class="mx-auto grid max-w-5xl gap-7 px-4 pt-6 sm:grid-cols-2 sm:pt-10">
+<section class="mx-auto grid max-w-5xl gap-7 px-4 pt-6 sm:grid-cols-2 sm:pt-10" data-record-product-view="{{ product.id }}">
   <div class="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-sand shadow-soft">
     {% if product.image_url %}
     <img alt="{{ product.name }}" class="h-full w-full object-cover" src="{{ product.image_url }}">
@@ -48,5 +48,3 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}
-<script>recordProductView({{ product.id }});</script>{% endblock %}

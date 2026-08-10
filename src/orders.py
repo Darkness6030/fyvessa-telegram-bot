@@ -28,32 +28,35 @@ ORDER_STATUS_LABELS = {
 }
 
 
-async def confirmed_cart_availability(user: User, items: Optional[list[CartItem]] = None) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
-    cart_items = items or await CartItem.get_for_user(user.id)
+async def confirmed_cart_availability(user: User, cart_items: Optional[list[CartItem]]) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
+    cart_items = cart_items or await CartItem.get_for_user(user.id)
     if not cart_items:
         return {}, []
 
-    product_ids = [item.product_id for item in cart_items]
-    requests = await AvailabilityRequest.get_latest_for_products(user.id, product_ids)
+    requests = await AvailabilityRequest.get_latest_for_products(
+        user.id, [cart_item.product_id for cart_item in cart_items]
+    )
+
     latest_by_product: dict[int, AvailabilityRequest] = {}
     for availability in requests:
         latest_by_product.setdefault(availability.product_id, availability)
 
-    confirmed: dict[int, AvailabilityRequest] = {}
-    missing: list[CartItem] = []
-    for item in cart_items:
-        availability = latest_by_product.get(item.product_id)
+    confirmations = {}
+    missing_items = []
+
+    for cart_item in cart_items:
+        availability = latest_by_product.get(cart_item.product_id)
         if (
             availability
             and availability.status == 'available'
-            and (availability.requested_quantity or 0) >= item.quantity
-            and (availability.available_quantity or 0) >= item.quantity
+            and (availability.requested_quantity or 0) >= cart_item.quantity
+            and (availability.available_quantity or 0) >= cart_item.quantity
         ):
-            confirmed[item.product_id] = availability
+            confirmations[cart_item.product_id] = availability
         else:
-            missing.append(item)
+            missing_items.append(cart_item)
 
-    return confirmed, missing
+    return confirmations, missing_items
 
 
 async def create_order_from_cart(
@@ -68,24 +71,24 @@ async def create_order_from_cart(
             detail='Заполните имя, фамилию, дату рождения и телефон в профиле',
         )
 
-    items = await CartItem.get_for_user(user.id)
-    if not items:
+    cart_items = await CartItem.get_for_user(user.id)
+    if not cart_items:
         raise HTTPException(status_code=409, detail='Корзина пуста')
 
-    confirmations, missing_confirmations = await confirmed_cart_availability(user, items)
-    if missing_confirmations:
+    confirmations, missing_items = await confirmed_cart_availability(user, cart_items)
+    if missing_items:
         raise HTTPException(
             status_code=409,
             detail='Сначала подтвердите наличие нужного количества всех товаров в корзине',
         )
 
     products = await Product.get_by_ids(
-        [item.product_id for item in items],
+        [item.product_id for item in cart_items],
         active_only=True,
     )
 
     products_by_id = {product.id: product for product in products}
-    if len(products_by_id) != len({item.product_id for item in items}):
+    if len(products_by_id) != len({item.product_id for item in cart_items}):
         raise HTTPException(
             status_code=409,
             detail='Один из товаров больше недоступен. Удалите его из корзины',
@@ -123,7 +126,7 @@ async def create_order_from_cart(
                 owner=products_by_id[item.product_id].owner,
                 owner_share_percent=products_by_id[item.product_id].owner_share_percent,
             )
-            for item in items
+            for item in cart_items
         ],
         personal_percent=personal_percent,
         promo_percent=promo_percent,
@@ -155,12 +158,12 @@ async def create_order_from_cart(
         for category in await Category.get_all()
     }
 
-    for item in items:
-        product = products_by_id[item.product_id]
+    for cart_item in cart_items:
+        product = products_by_id[cart_item.product_id]
         OrderItem(
             order_id=order.id,
             product_id=product.id,
-            quantity=item.quantity,
+            quantity=cart_item.quantity,
             sku_snapshot=product.sku,
             product_name_snapshot=product.name,
             category_snapshot=category_names.get(product.category_id, 'Без категории'),
@@ -184,8 +187,8 @@ async def create_order_from_cart(
             reason=f'Списание для заказа {order.number}',
         ).add()
 
-    for item in items:
-        await item.delete()
+    for cart_item in cart_items:
+        await cart_item.delete()
 
     for availability in confirmations.values():
         availability.status = 'used'
@@ -214,18 +217,18 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     if order.status != 'payment_review':
         raise ValueError('Сначала пользователь должен сообщить об оплате')
 
-    items = await OrderItem.get_for_order(order.id)
+    order_items = await OrderItem.get_for_order(order.id)
     pricing = calculate_pricing(
         [
             PricingLine(
-                quantity=item.quantity,
-                retail_price=item.retail_price_snapshot,
-                sale_price=item.sale_price_snapshot,
-                wholesale_price=item.wholesale_price_snapshot,
-                owner=item.owner_snapshot,
-                owner_share_percent=item.owner_share_percent_snapshot,
+                quantity=order_item.quantity,
+                retail_price=order_item.retail_price_snapshot,
+                sale_price=order_item.sale_price_snapshot,
+                wholesale_price=order_item.wholesale_price_snapshot,
+                owner=order_item.owner_snapshot,
+                owner_share_percent=order_item.owner_share_percent_snapshot,
             )
-            for item in items
+            for order_item in order_items
         ],
         personal_percent=order.personal_discount_percent,
         promo_percent=order.promo_discount_percent,
@@ -240,6 +243,7 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     order.diana_share = pricing.diana_share
     order.bulat_share = pricing.bulat_share
     order.partner_reward = Decimal('0')
+
     if order.promo_code_id:
         promocode = await Promocode.get_by_id(order.promo_code_id)
         if promocode:
@@ -253,10 +257,10 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
     order.paid_by_admin_id = admin_id
     order.add()
 
-    for item in items:
-        product = await Product.get_by_id(item.product_id)
+    for order_item in order_items:
+        product = await Product.get_by_id(order_item.product_id)
         if product:
-            product.purchases_count += item.quantity
+            product.purchases_count += order_item.quantity
             product.add()
 
     return True

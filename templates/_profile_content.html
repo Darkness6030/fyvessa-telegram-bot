@@ -1,22 +1,84 @@
-<form class="space-y-4 rounded-[2rem] bg-white p-6 shadow-soft" id="profile-form">
-  <label class="block"><span class="text-sm font-bold">Имя</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="first_name" required value="{{ user.first_name or '' }}"></label>
-  <label class="block"><span class="text-sm font-bold">Фамилия</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="last_name" required value="{{ user.last_name or '' }}"></label>
-  <label class="block"><span class="text-sm font-bold">Дата рождения</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="birth_date" required type="date" value="{{ user.birth_date or '' }}"></label>
-  <label class="block"><span class="text-sm font-bold">Номер телефона</span><input class="mt-2 w-full rounded-xl bg-cream px-4 py-3 outline-none" name="phone_number" required type="tel" value="{{ user.phone_number or '' }}"></label>
-  <div class="rounded-xl bg-cream px-4 py-3 text-sm text-black/55">
-    Telegram ID {{ user.id }} · @{{ user.username or 'без username' }}
+{% set first_name = user.first_name or '' %}
+{% set last_name = user.last_name or '' %}
+{% set initials = (first_name[:1] ~ last_name[:1])|upper or 'F' %}
+<div class="space-y-4">
+  <section class="profile-hero relative overflow-hidden rounded-[2rem] bg-ink p-5 text-white shadow-soft sm:p-7">
+    <div class="profile-glow absolute -right-16 -top-20 h-56 w-56 rounded-full bg-coral"></div>
+    <div class="relative flex items-center gap-4">
+      <div class="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-white text-xl font-black text-ink shadow-lg sm:h-20 sm:w-20 sm:text-2xl" data-profile-initials>{{ initials }}</div>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-full bg-white/10 px-3 py-1 text-xs font-bold" data-profile-completion>
+            {{ '✓ Профиль готов' if user.is_registered else 'Осталось заполнить данные' }}
+          </span>
+        </div>
+        <h2 class="mt-2 truncate text-2xl font-black tracking-tight sm:text-3xl" data-profile-name>{{ (first_name ~ ' ' ~ last_name)|trim or 'Ваш профиль' }}</h2>
+        <p class="mt-1 truncate text-sm text-white/50">{{ '@' ~ user.username if user.username else 'Telegram ID ' ~ user.id }}</p>
+      </div>
+    </div>
+    <div class="relative mt-6 grid grid-cols-2 gap-2">
+      <div class="rounded-2xl bg-white/10 px-4 py-3">
+        <p class="text-xs text-white/45">Баланс</p>
+        <p class="mt-1 text-xl font-black">{{ user.coin_balance }} <span class="text-sm text-white/55">коинов</span></p>
+      </div>
+      <div class="rounded-2xl bg-white/10 px-4 py-3">
+        <p class="text-xs text-white/45">Ваша скидка</p>
+        <p class="mt-1 text-xl font-black">{{ user.personal_discount_percent }}%</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid gap-4 lg:grid-cols-[.82fr_1.18fr] lg:items-start">
+    <div class="space-y-4">
+      <section class="rounded-[2rem] bg-white p-4 shadow-soft sm:p-5">
+        <div class="mb-3 flex items-center justify-between px-1">
+          <h3 class="font-black">Быстрый доступ</h3>
+          <span class="text-xs text-black/35">Всё под рукой</span>
+        </div>
+        <div class="space-y-2">
+          <a class="profile-link group" href="/orders">
+            <span class="profile-link-icon bg-sage/20">□</span>
+            <span class="min-w-0 flex-1"><strong class="block">Мои заказы</strong><span class="text-sm text-black/45">История и статусы</span></span>
+            <strong class="rounded-full bg-cream px-3 py-1 text-sm">{{ orders_count }}</strong><span class="text-black/25 transition group-hover:translate-x-1">→</span>
+          </a>
+          <a class="profile-link group" href="/favorites">
+            <span class="profile-link-icon bg-coral/10 text-coral">♥</span>
+            <span class="min-w-0 flex-1"><strong class="block">Избранное</strong><span class="text-sm text-black/45">Сохранённые товары</span></span>
+            <strong class="rounded-full bg-cream px-3 py-1 text-sm">{{ favorites_count }}</strong><span class="text-black/25 transition group-hover:translate-x-1">→</span>
+          </a>
+          <a class="profile-link group" href="/cart">
+            <span class="profile-link-icon bg-sand/50">◒</span>
+            <span class="min-w-0 flex-1"><strong class="block">Корзина</strong><span class="text-sm text-black/45">Продолжить покупки</span></span>
+            <strong class="rounded-full bg-cream px-3 py-1 text-sm">{{ cart_quantity }}</strong><span class="text-black/25 transition group-hover:translate-x-1">→</span>
+          </a>
+          {% if support_url %}
+          <a class="profile-link group" data-no-soft-nav href="{{ support_url }}">
+            <span class="profile-link-icon bg-ink text-white">?</span>
+            <span class="min-w-0 flex-1"><strong class="block">Поддержка</strong><span class="text-sm text-black/45">Написать нам</span></span>
+            <span class="text-black/25 transition group-hover:translate-x-1">↗</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+
+      <div class="rounded-2xl border border-black/5 px-5 py-4 text-sm text-black/45">
+        <span class="font-bold text-ink">Telegram ID</span> {{ user.id }}
+      </div>
+    </div>
+
+    <form class="rounded-[2rem] bg-white p-5 shadow-soft sm:p-7" id="profile-form">
+      <div class="flex items-start justify-between gap-4">
+        <div><h3 class="text-xl font-black">Личные данные</h3><p class="mt-1 text-sm text-black/45">Нужны только для оформления заказа.</p></div>
+        <span class="profile-save-status text-xs font-bold text-black/35" data-profile-status>Сохранено</span>
+      </div>
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        <label class="profile-field"><span>Имя</span><input autocomplete="given-name" name="first_name" required value="{{ first_name }}"></label>
+        <label class="profile-field"><span>Фамилия</span><input autocomplete="family-name" name="last_name" required value="{{ last_name }}"></label>
+        <label class="profile-field"><span>Дата рождения</span><input autocomplete="bday" max="{{ today }}" name="birth_date" required type="date" value="{{ user.birth_date or '' }}"></label>
+        <label class="profile-field"><span>Телефон</span><input autocomplete="tel" inputmode="tel" name="phone_number" placeholder="+7 999 000-00-00" required type="tel" value="{{ user.phone_number or '' }}"></label>
+      </div>
+      <button class="mt-6 w-full rounded-2xl bg-ink py-4 font-black text-white shadow-lg shadow-black/10" data-profile-save type="submit">Сохранить изменения</button>
+      <p class="mt-3 text-center text-xs text-black/35">Данные остаются внутри магазина и не публикуются.</p>
+    </form>
   </div>
-  <div class="grid grid-cols-2 gap-3">
-    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Коины</span>
-      <p class="font-black">{{ user.coin_balance }}</p></div>
-    <div class="rounded-xl bg-cream px-4 py-3"><span class="text-xs text-black/45">Скидка</span>
-      <p class="font-black">{{ user.personal_discount_percent }}%</p></div>
-  </div>
-  <div class="grid grid-cols-3 gap-2 text-center text-sm">
-    <a class="rounded-xl border border-black/10 px-2 py-3" href="/orders"><strong class="block text-lg">{{ orders_count }}</strong><span class="text-black/45">Заказы</span></a>
-    <a class="rounded-xl border border-black/10 px-2 py-3" href="/favorites"><strong class="block text-lg">{{ favorites_count }}</strong><span class="text-black/45">Избранное</span></a>
-    <a class="rounded-xl border border-black/10 px-2 py-3" href="/cart"><strong class="block text-lg">{{ cart_quantity }}</strong><span class="text-black/45">В корзине</span></a>
-  </div>
-  <button class="w-full rounded-xl bg-ink py-4 font-black text-white">Сохранить</button>
-  <a class="block w-full rounded-xl border border-black/10 py-4 text-center font-black" href="/orders">Мои заказы</a>
-</form>
+</div>
