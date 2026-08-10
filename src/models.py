@@ -46,15 +46,15 @@ class Product(SQLModel, table=True):
     name: str = Field(index=True)
     description: str = Field(default='', sa_type=Text)
     characteristics: str = Field(default='', sa_type=Text)
-    retail_price: Decimal = Field(max_digits=12, decimal_places=2)
-    wholesale_price: Decimal = Field(max_digits=12, decimal_places=2)
-    discount_price: Optional[Decimal] = Field(default=None, max_digits=12, decimal_places=2)
+    retail_price: Decimal = Field(decimal_places=2)
+    wholesale_price: Decimal = Field(decimal_places=2)
+    discount_price: Optional[Decimal] = Field(default=None, decimal_places=2)
     image_url: Optional[str] = None
     is_active: bool = Field(default=True, index=True)
     is_popular: bool = Field(default=False, index=True)
     is_recommended: bool = Field(default=False, index=True)
     owner: str = 'Булат'
-    owner_share_percent: Decimal = Field(default=Decimal('70'), max_digits=5, decimal_places=2)
+    owner_share_percent: Decimal = Field(default=Decimal('70'), decimal_places=2)
     views_count: int = 0
     cart_additions_count: int = 0
     purchases_count: int = 0
@@ -294,8 +294,8 @@ class Promocode(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     code: str = Field(index=True)
     partner_name: str
-    user_discount_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
-    partner_reward_percent: Decimal = Field(default=Decimal('10'), max_digits=5, decimal_places=2)
+    user_discount_percent: Decimal = Field(default=Decimal('10'), decimal_places=2)
+    partner_reward_percent: Decimal = Field(default=Decimal('10'), decimal_places=2)
     is_active: bool = Field(default=True, index=True)
     is_deleted: bool = Field(default=False, index=True)
 
@@ -345,17 +345,17 @@ class Order(SQLModel, table=True):
     payment_status: str = Field(default='not_paid', index=True)
     promo_code_id: Optional[int] = Field(default=None, foreign_key='promocode.id')
     discount_mode: str = 'none'
-    product_discount_total: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    personal_discount_percent: Decimal = Field(default=Decimal('0'), max_digits=5, decimal_places=2)
-    promo_discount_percent: Decimal = Field(default=Decimal('0'), max_digits=5, decimal_places=2)
-    coins_used: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    subtotal: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    paid_total: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    wholesale_total: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    net_profit: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    diana_share: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    bulat_share: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
-    partner_reward: Decimal = Field(default=Decimal('0'), max_digits=12, decimal_places=2)
+    product_discount_total: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    personal_discount_percent: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    promo_discount_percent: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    coins_used: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    subtotal: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    paid_total: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    wholesale_total: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    net_profit: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    diana_share: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    bulat_share: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    partner_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
 
     payment_reported_at: Optional[datetime] = None
     paid_at: Optional[datetime] = Field(default=None, index=True)
@@ -403,11 +403,11 @@ class OrderItem(SQLModel, table=True):
     sku_snapshot: str
     product_name_snapshot: str
     category_snapshot: str
-    retail_price_snapshot: Decimal = Field(max_digits=12, decimal_places=2)
-    sale_price_snapshot: Decimal = Field(max_digits=12, decimal_places=2)
-    wholesale_price_snapshot: Decimal = Field(max_digits=12, decimal_places=2)
+    retail_price_snapshot: Decimal = Field(decimal_places=2)
+    sale_price_snapshot: Decimal = Field(decimal_places=2)
+    wholesale_price_snapshot: Decimal = Field(decimal_places=2)
     owner_snapshot: str
-    owner_share_percent_snapshot: Decimal = Field(max_digits=5, decimal_places=2)
+    owner_share_percent_snapshot: Decimal = Field(decimal_places=2)
 
     @classmethod
     async def get_for_order(cls, order_id: int) -> list[Self]:
@@ -419,6 +419,6 @@ class CoinTransaction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     order_id: Optional[int] = Field(default=None, foreign_key='order.id', index=True)
-    amount: Decimal = Field(max_digits=12, decimal_places=2)
-    balance_after: Decimal = Field(max_digits=12, decimal_places=2)
+    amount: Decimal = Field(decimal_places=2)
+    balance_after: Decimal = Field(decimal_places=2)
     reason: str

@@ -130,9 +130,9 @@ async def create_order_from_cart(
         coins_requested=coins_requested,
     )
 
-    now = datetime.now()
+    current_date = datetime.now()
     order = Order(
-        number=f'FY-{now:%y%m%d}-{uuid4().hex[:6].upper()}',
+        number=f'FY-{current_date:%y%m%d}-{uuid4().hex[:6].upper()}',
         user_id=user.id,
         status='awaiting_payment',
         payment_status='not_paid',
@@ -146,10 +146,15 @@ async def create_order_from_cart(
         paid_total=pricing.paid_total,
         wholesale_total=pricing.wholesale_total,
     ).add()
-    await session_context.get().flush()
 
-    categories = await Category.get_all()
-    category_names = {category.id: category.name for category in categories}
+    session = session_context.get()
+    await session.flush()
+
+    category_names = {
+        category.id: category.name
+        for category in await Category.get_all()
+    }
+
     for item in items:
         product = products_by_id[item.product_id]
         OrderItem(
@@ -168,8 +173,9 @@ async def create_order_from_cart(
 
     if pricing.coins_used:
         user.coin_balance = money(user.coin_balance - pricing.coins_used)
-        user.updated_at = now
+        user.updated_at = current_date
         user.add()
+
         CoinTransaction(
             user_id=user.id,
             order_id=order.id,

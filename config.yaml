@@ -10,9 +10,7 @@ src:
   admin_flow:
     admin_chat_id: !env "ADMIN_CHAT_ID:"
     mini_app_url: !env "MINI_APP_URL:"
-    products_path: !env "PRODUCTS_PATH:"
   routes:
-    products_path: !env "PRODUCTS_PATH:"
     payment_details: !env "PAYMENT_DETAILS:"
 rewire:
   log:

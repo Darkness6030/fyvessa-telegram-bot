@@ -32,7 +32,6 @@ from src.orders import cancel_order, confirm_payment, ORDER_STATUS_LABELS
 class Config(BaseModel):
     admin_chat_id: int
     mini_app_url: str
-    products_path: str = 'assets/products.xlsx'
 
 
 plugin = simple_plugin()
@@ -169,7 +168,7 @@ async def notify_payment_review(order: Order, user: User) -> bool:
 
 ADMIN_TEXT = (
     '<b>Администрирование Fyvessa</b>\n\n'
-    'Выберите очередь или действие. Товары редактируются в Excel, остальные '
+    'Выберите очередь или действие. Товары редактируются в Google Sheets, остальные '
     'операции выполняются здесь.'
 )
 
@@ -191,7 +190,7 @@ def _admin_keyboard():
             ('👥 Пользователи', 'users'),
             ('🎟 Промокоды', 'promos'),
             ('📊 Сводка', 'summary'),
-            ('🔄 Синхронизировать Excel', 'sync'),
+            ('🔄 Синхронизировать товары', 'sync'),
             ('❓ Команды и подсказки', 'help'),
         )
     ])
@@ -280,7 +279,7 @@ def _help_text() -> str:
         '/order &lt;ID&gt; &lt;оплачен|отмена&gt; — изменить заказ\n'
         '/promo CODE | Партнёр | скидка | вознаграждение — создать или обновить\n'
         '/promo_toggle CODE — включить или выключить промокод\n'
-        '/sync_products — синхронизировать assets/products.xlsx\n\n'
+        '/sync_products — синхронизировать Google Sheets «Fyvessa Admin»\n\n'
         'Также поддерживаются значения available, unavailable, on_request, paid и cancel.\n\n'
         'Безопасность: команды и кнопки работают только в настроенном админском чате.'
     )
@@ -294,10 +293,10 @@ async def admin_menu(message: Message, state: FSMContext):
 
 async def _sync_text() -> str:
     try:
-        report = await sync_catalog(Config.products_path)
+        report = await sync_catalog()
     except CatalogValidationError as exc:
         return (
-            '❌ <b>Excel не импортирован</b>\n'
+            '❌ <b>Google Sheets не синхронизирован</b>\n'
             f'<pre>{html.escape(str(exc))}</pre>'
         )
 
@@ -306,7 +305,8 @@ async def _sync_text() -> str:
         f'Создано товаров: {report.products_created}\n'
         f'Обновлено товаров: {report.products_updated}\n'
         f'Скрыто товаров: {report.products_hidden}\n'
-        f'Создано категорий: {report.categories_created}'
+        f'Создано категорий: {report.categories_created}\n'
+        f'Исправлено строк: {report.rows_corrected}'
     )
 
 

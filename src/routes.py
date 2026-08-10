@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
-from rewire import config, logger, simple_plugin
+from rewire import config, simple_plugin
 from rewire_sqlmodel import session_context, transaction
 
 from src.admin_flow import (
@@ -16,7 +16,6 @@ from src.admin_flow import (
     notify_payment_review,
 )
 from src.auth import get_init_data_user
-from src.catalog import CatalogValidationError, sync_catalog
 from src.models import (
     AvailabilityRequest,
     CartItem,
@@ -33,7 +32,6 @@ from src.orders import (confirmed_cart_availability, create_order_from_cart, ORD
 
 @config
 class Config(BaseModel):
-    products_path: str = 'assets/products.xlsx'
     payment_details: str = 'Реквизиты для оплаты уточните в чате поддержки'
 
 
@@ -670,18 +668,3 @@ async def report_order_payment(order_id: int, user: RequestUser) -> ReportPaymen
 def include_router(app: FastAPI) -> None:
     app.mount('/static', StaticFiles(directory=Path('static')), name='static')
     app.include_router(router)
-
-
-@plugin.setup()
-@transaction(1)
-async def import_catalog() -> None:
-    try:
-        report = await sync_catalog(Config.products_path)
-        logger.info(
-            'Catalog sync complete: created={}, updated={}, hidden={}',
-            report.products_created,
-            report.products_updated,
-            report.products_hidden,
-        )
-    except CatalogValidationError as exc:
-        logger.error('Catalog setup sync failed: {}', exc)
