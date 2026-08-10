@@ -1,4 +1,5 @@
-from aiogram import Dispatcher, Router
+from aiogram import Dispatcher, F, Router
+from aiogram.enums import ChatType
 from aiogram.filters import Command, CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import (
@@ -24,6 +25,9 @@ class Config(BaseModel):
 
 plugin = simple_plugin()
 router = Router(name='main')
+
+router.message.filter(F.chat.type == ChatType.PRIVATE)
+router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
 
 
 def create_main_keyboard() -> InlineKeyboardMarkup:
