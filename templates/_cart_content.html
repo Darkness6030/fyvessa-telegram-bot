@@ -1,9 +1,10 @@
+{% from "_product_placeholder.html" import product_placeholder %}
 {% if items %}
 <div class="space-y-3" data-cart-pending="{{ 'true' if has_pending_requests else 'false' }}">
   {% for item in items %}{% set product = products_by_id.get(item.product_id) %}{% if product %}
   {% set availability = availability_by_product.get(product.id) %}
   <article class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft" data-cart-item data-product-id="{{ product.id }}" data-unit-price="{{ product.current_price }}">
-    <a class="h-24 w-20 overflow-hidden rounded-2xl bg-sand" href="/products/{{ product.sku }}">{% if product.image_url %}<img alt="" class="h-full w-full object-cover" src="{{ product.image_url }}">{% endif %}</a>
+    <a class="h-24 w-20 overflow-hidden rounded-2xl bg-sand" href="/products/{{ product.sku }}">{% if product.image_url %}<img alt="" class="h-full w-full object-cover" src="{{ product.image_url }}">{% else %}{{ product_placeholder(compact=true) }}{% endif %}</a>
     <div class="min-w-0 flex-1"><h2 class="truncate font-black">{{ product.name }}</h2>
       <p class="mt-1 text-sm text-black/50">{{ "%.0f"|format(product.current_price) }} ₽ за шт.</p>
       <div class="mt-2 flex items-center gap-2">
@@ -48,7 +49,7 @@
   </div>
   {% if not user.is_registered %}<p class="mt-4 rounded-xl bg-coral/20 px-4 py-3 text-sm">Перед заказом потребуется <a class="font-black underline" href="/profile">заполнить профиль</a>.</p>{% endif %}
   {% if missing_confirmation_count %}<p class="mt-4 rounded-xl bg-white/10 px-4 py-3 text-sm">Для оформления подтвердите нужное количество каждого товара. Запрос сразу появится в админском чате.</p>{% endif %}
-  <button %} %}disabled{% class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:cursor-not-allowed disabled:opacity-40" endif if missing_confirmation_count type="submit" {%>{{ 'Ждём подтверждения наличия' if missing_confirmation_count else 'Оформить заказ' }}</button>
+  <button class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:cursor-not-allowed disabled:opacity-40" type="submit" {% if missing_confirmation_count %}disabled{% endif %}>{{ 'Ждём подтверждения наличия' if missing_confirmation_count else 'Оформить заказ' }}</button>
 </form>
 {% else %}
 <div class="rounded-[2rem] border border-dashed border-black/20 p-12 text-center"><p class="text-4xl">🛒</p>

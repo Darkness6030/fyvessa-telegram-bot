@@ -1,3 +1,4 @@
+{% from "_product_placeholder.html" import product_placeholder %}
 {% macro product_card(product, category, is_new) -%}
 <article class="group relative min-w-0" data-product-card-id="{{ product.id }}">
   <a class="block" href="/products/{{ product.sku }}">
@@ -5,7 +6,7 @@
       {% if product.image_url %}
       <img alt="{{ product.name }}" class="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" src="{{ product.image_url }}">
       {% else %}
-      <div class="product-placeholder flex h-full items-end p-5 text-3xl font-black tracking-tight text-white/90">{{ product.name[:1] }}</div>
+      {{ product_placeholder() }}
       {% endif %}
       <div class="absolute left-3 top-3 flex flex-wrap gap-2">
         {% if is_new(product) %}<span class="rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-wider">Новинка</span>{% endif %}

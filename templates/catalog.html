@@ -10,7 +10,7 @@
     <select class="rounded-xl bg-cream px-3 py-3 outline-none" name="category_id">
       <option value="">Все категории</option>
       {% for category in categories %}
-      <option %} %}selected{% category.id endif filters.category_id="=" if value="{{ category.id }}" {%>{{ category.name }}</option>
+      <option value="{{ category.id }}" {% if filters.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
       {% endfor %}
     </select>
     <input class="rounded-xl bg-cream px-3 py-3 outline-none" min="0" name="min_price" placeholder="Цена от" type="number" value="{{ filters.min_price if filters.min_price is not none else '' }}">

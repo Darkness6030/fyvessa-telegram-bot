@@ -1,0 +1,16 @@
+{% macro product_placeholder(compact=false) -%}
+<div aria-label="Фотография товара отсутствует" class="product-placeholder flex h-full w-full items-center justify-center" role="img">
+  <div class="product-placeholder-content flex flex-col items-center text-center">
+    <span class="product-placeholder-icon grid place-items-center rounded-full">
+      <svg aria-hidden="true" fill="none" viewBox="0 0 48 48">
+        <path d="M11 16.5A4.5 4.5 0 0 1 15.5 12h17a4.5 4.5 0 0 1 4.5 4.5v15a4.5 4.5 0 0 1-4.5 4.5h-17a4.5 4.5 0 0 1-4.5-4.5v-15Z" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="29.5" cy="19.5" r="3.5" fill="currentColor" opacity=".75"/>
+        <path d="m13 31 7.5-7.5 5.5 5 3.5-3.5 6.5 6.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"/>
+      </svg>
+    </span>
+    {% if not compact %}
+    <span class="product-placeholder-label mt-4 text-xs font-black uppercase tracking-[.18em]">Фото скоро</span>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}
