@@ -650,7 +650,6 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
         await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
     elif callback_data.section == 'sync':
         await callback.answer('Синхронизация запущена')
-        await _edit_message(callback, SYNC_STARTED_TEXT)
         await _edit_message(callback, await _sync_text(), _back_keyboard())
     elif callback_data.section == 'help':
         await _edit_message(callback, _help_text(), _back_keyboard())
