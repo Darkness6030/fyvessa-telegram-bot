@@ -19,7 +19,7 @@ MAX_MONEY = Decimal('9999999999.99')
 class SheetSpec:
     columns: tuple[str, ...]
     aliases: dict[str, str]
-    checkbox_fields: tuple[str, ...] = ()
+    display_names: dict[str, str] | None = None
 
 
 PRODUCTS = SheetSpec(
@@ -48,16 +48,18 @@ PRODUCTS = SheetSpec(
 )
 
 OWNERS = SheetSpec(
-    columns=('name', 'share_percent', 'is_active'),
+    columns=('name', 'share_percent'),
     aliases={
         'владелец': 'name',
         'имя': 'name',
         'доля': 'share_percent',
         'процент': 'share_percent',
         'доля владельца': 'share_percent',
-        'активен': 'is_active',
     },
-    checkbox_fields=('is_active',),
+    display_names={
+        'name': 'Владелец',
+        'share_percent': 'Доля',
+    },
 )
 
 SETTINGS = SheetSpec(
@@ -67,11 +69,19 @@ SETTINGS = SheetSpec(
         'значение': 'value',
         'описание': 'description',
     },
+    display_names={
+        'key': 'Ключ',
+        'value': 'Значение',
+        'description': 'Описание',
+    },
 )
 
-OWNERS_SHEET = 'owners'
-SETTINGS_SHEET = 'settings'
-RESERVED_SHEET_TITLES = frozenset({OWNERS_SHEET, SETTINGS_SHEET})
+OWNERS_SHEET = 'Владельцы'
+SETTINGS_SHEET = 'Настройки'
+RESERVED_SHEET_TITLES = frozenset({
+    OWNERS_SHEET.casefold(),
+    SETTINGS_SHEET.casefold(),
+})
 
 T = TypeVar('T')
 
@@ -107,15 +117,17 @@ def columns(
         if field not in spec.columns or field in result:
             continue
         result[field] = column
-        if str(value or '').strip() != field:
-            updates.append(CellUpdate(1, column, field))
+        expected_header = (spec.display_names or {}).get(field, field)
+        if str(value or '').strip() != expected_header:
+            updates.append(CellUpdate(1, column, expected_header))
 
     for field in spec.columns:
         if field in result:
             continue
         result[field] = len(headers) + 1
-        headers.append(field)
-        updates.append(CellUpdate(1, len(headers), field))
+        header = (spec.display_names or {}).get(field, field)
+        headers.append(header)
+        updates.append(CellUpdate(1, len(headers), header))
 
     return result, updates
 
@@ -210,6 +222,7 @@ def worksheet_values(
         ranges,
         params={'valueRenderOption': ValueRenderOption.unformatted.value},
     )
+
     value_ranges = response.get('valueRanges', [])
     return {
         worksheet.title: (
@@ -260,6 +273,7 @@ def as_money(value: Any) -> Optional[Decimal]:
     result = as_decimal(value)
     if result is None or abs(result) > MAX_MONEY:
         return result
+
     try:
         return result.quantize(MONEY_QUANT)
     except InvalidOperation:

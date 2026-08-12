@@ -27,7 +27,6 @@ class OwnerRow(BaseModel):
 
     name: str = PydanticField(min_length=1)
     share_percent: Decimal = PydanticField(default=Decimal('70'), ge=0, le=100)
-    is_active: bool = True
 
 
 class CatalogRow(BaseModel):
