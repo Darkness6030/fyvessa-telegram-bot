@@ -13,7 +13,6 @@ plugin = simple_plugin()
 class Category(SQLModel, table=True):
     id: int = Field(primary_key=True)
     name: str = Field(index=True)
-    image_url: Optional[str] = None
     is_active: bool = Field(default=True, index=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

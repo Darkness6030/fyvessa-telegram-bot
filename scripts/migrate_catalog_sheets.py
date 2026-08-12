@@ -15,9 +15,13 @@ from typing import Any
 import gspread
 from gspread.utils import ValueInputOption, ValueRenderOption
 
-from src.sheets import (
+from src.sheet_utils import (
     CREDENTIALS_PATH,
+    PRODUCTS,
     SPREADSHEET_TITLE,
+    as_money,
+    normalize_sku,
+    sheet_value,
 )
 from src.sheet_images import (
     IMAGE_DIR,
@@ -27,12 +31,6 @@ from src.sheet_images import (
     export_xlsx,
     image_suffix,
     save_manifest,
-)
-from src.sheet_schema import (
-    PRODUCTS,
-    as_money,
-    normalize_sku,
-    sheet_value,
 )
 
 

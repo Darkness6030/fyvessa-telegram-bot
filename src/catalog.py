@@ -20,8 +20,6 @@ class CategoryRow(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = PydanticField(min_length=1)
-    image_url: Optional[str] = None
-    is_active: bool = True
 
 
 class OwnerRow(BaseModel):
@@ -38,7 +36,6 @@ class CatalogRow(BaseModel):
     sku: str = PydanticField(min_length=1, max_length=100)
     name: str = PydanticField(min_length=1)
     category: str = PydanticField(min_length=1)
-    category_image_url: Optional[str] = None
     description: str = ''
     characteristics: str = ''
     retail_price: Decimal = PydanticField(gt=0, decimal_places=2)
@@ -102,14 +99,13 @@ async def _apply_catalog(source: CatalogSource) -> SyncReport:
     for row in source.categories:
         category = database_categories.get(row.name.casefold())
         if category is None:
-            category = Category(**row.model_dump()).add()
+            category = Category(name=row.name).add()
             await session.flush()
             database_categories[row.name.casefold()] = category
             created_categories += 1
             continue
 
-        category.image_url = row.image_url
-        category.is_active = row.is_active
+        category.is_active = True
         category.updated_at = current_date
         category.add()
 
@@ -121,9 +117,7 @@ async def _apply_catalog(source: CatalogSource) -> SyncReport:
 
     for row in source.products:
         category = database_categories[row.category.casefold()]
-        values = row.model_dump(
-            exclude={'category', 'category_image_url'}, exclude_none=False,
-        )
+        values = row.model_dump(exclude={'category'}, exclude_none=False)
 
         values.update(category_id=category.id, updated_at=current_date)
         product = database_products.get(row.sku.casefold())
