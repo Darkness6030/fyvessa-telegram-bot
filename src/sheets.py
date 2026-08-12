@@ -44,6 +44,19 @@ SETTING_ALIASES = {
     'реквизиты для оплаты': 'payment_details',
 }
 
+TECHNICAL_CHARACTERISTIC_LABELS = frozenset({
+    'доставка',
+    'закупочная цена',
+    'маржа',
+    'наценка',
+    'наценка доставка',
+    'оптовая цена',
+    'поставщик',
+    'себестоимость',
+    'owner',
+    'supplier',
+})
+
 T = TypeVar('T')
 
 
@@ -206,6 +219,16 @@ def _image_reference(value: Any) -> Optional[str]:
     return None
 
 
+def _clean_characteristics(value: Any) -> str:
+    result = []
+    for line in str(value or '').splitlines():
+        label = line.partition(':')[0].casefold()
+        label = re.sub(r'[^a-zа-яё]+', ' ', label).strip()
+        if label not in TECHNICAL_CHARACTERISTIC_LABELS and line.strip():
+            result.append(line.strip())
+    return '\n'.join(result)
+
+
 def _normalize_settings(
     values: list[list[Any]],
 ) -> tuple[StoreSettings, list[CellUpdate]]:
@@ -357,7 +380,7 @@ def _normalize_products(
             'sku': product_sku,
             'name': product_name,
             'description': str(raw_data['description'] or '').strip(),
-            'characteristics': str(raw_data['characteristics'] or '').strip(),
+            'characteristics': _clean_characteristics(raw_data['characteristics']),
             **prices,
             'image_url': (
                 embedded_image_urls.get(row_number)

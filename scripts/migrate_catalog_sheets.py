@@ -142,7 +142,6 @@ def _perfume_rows(
                 ('Страна', _at(row, 6)),
                 ('Пол', _at(row, 7)),
                 ('Качество', _at(row, 8)),
-                ('Наценка / доставка', _at(row, 4)),
             ]),
             'retail_price': retail if safe else Decimal('1'),
             'wholesale_price': wholesale if safe else Decimal('0'),

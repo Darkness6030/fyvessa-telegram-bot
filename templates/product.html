@@ -30,7 +30,9 @@
       <span class="text-lg text-black/35 line-through">{{ "%.0f"|format(product.retail_price) }} ₽</span>
       {% endif %}
     </div>
-    <p class="mt-6 whitespace-pre-line leading-relaxed text-black/65">{{ product.description or 'Описание скоро появится.' }}</p>
+    {% if product.description %}
+    <p class="mt-6 whitespace-pre-line leading-relaxed text-black/65">{{ product.description }}</p>
+    {% endif %}
     {% if product.characteristics %}
     <div class="mt-6 rounded-2xl bg-white p-5"><p class="text-xs font-black uppercase tracking-wider text-black/40">Характеристики</p>
       <p class="mt-2 whitespace-pre-line text-sm leading-relaxed">{{ product.characteristics }}</p></div>
