@@ -17,7 +17,7 @@ from src.catalog import (
     OwnerRow,
 )
 from src.settings import SettingsValidationError, StoreSettings
-from src.sheet_images import load_manifest
+from src.sheet_images import cache_spreadsheet_images
 from src.sheet_schema import (as_decimal, as_money, MAX_MONEY, normalize_sku, OWNERS, PRODUCTS, SETTINGS, sheet_value, SheetSpec)
 
 SPREADSHEET_TITLE = 'Fyvessa Admin'
@@ -549,7 +549,11 @@ def _load_catalog() -> CatalogSource:
         }
         owners = _normalize_owners(control_values[OWNERS.title])
 
-        image_urls = load_manifest()
+        image_urls = cache_spreadsheet_images(
+            client,
+            spreadsheet.id,
+            [worksheet.title for worksheet in product_worksheets],
+        )
 
         product_rows = []
         product_updates = {}

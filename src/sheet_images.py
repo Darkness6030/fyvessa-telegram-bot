@@ -1,11 +1,15 @@
+import hashlib
 import io
 import json
 import posixpath
+import re
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path, PurePosixPath
 
 import gspread
+from requests import RequestException
 
 IMAGE_DIR = Path('assets/catalog')
 MANIFEST_PATH = IMAGE_DIR / 'manifest.json'
@@ -33,10 +37,92 @@ def load_manifest() -> dict[str, dict[int, str]]:
 
 def save_manifest(manifest: dict[str, dict[int, str]]) -> None:
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
+    temporary_path = MANIFEST_PATH.with_suffix('.tmp')
+    temporary_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
+    temporary_path.replace(MANIFEST_PATH)
+
+
+def cache_spreadsheet_images(
+    client: gspread.Client,
+    spreadsheet_id: str,
+    worksheet_titles: list[str],
+) -> dict[str, dict[int, str]]:
+    """Extract full-size cell images and return their public URLs by sheet/row.
+
+    The Sheets values API does not expose images placed directly in cells. Google
+    does include their original bytes in an XLSX export, so the catalog keeps the
+    image cells intact and extracts them during each sync.
+    """
+    try:
+        exported = embedded_images(export_xlsx(client, spreadsheet_id))
+        manifest = _cache_images(exported, worksheet_titles)
+    except (RequestException, zipfile.BadZipFile):
+        cached = load_manifest()
+        if _manifest_files_exist(cached, worksheet_titles):
+            return cached
+        raise
+
+    save_manifest(manifest)
+    return manifest
+
+
+def _cache_images(
+    exported: dict[str, dict[tuple[int, int], bytes]],
+    worksheet_titles: list[str],
+) -> dict[str, dict[int, str]]:
+    manifest: dict[str, dict[int, str]] = {}
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+    for title in worksheet_titles:
+        images = exported.get(title) or exported.get(_xlsx_title(title), {})
+        row_urls = manifest.setdefault(title, {})
+        for (row, column), data in images.items():
+            if column != 1:
+                continue
+
+            digest = hashlib.sha256(data).hexdigest()[:24]
+            filename = f'{digest}{image_suffix(data)}'
+            path = IMAGE_DIR / filename
+            if not path.is_file() or path.stat().st_size != len(data):
+                path.write_bytes(data)
+            row_urls[row] = f'{URL_PREFIX}/{filename}'
+
+    return manifest
+
+
+def _xlsx_title(title: str) -> str:
+    return re.sub(r'[:\\/?*\[\]]', '', title)[:31]
+
+
+def _manifest_files_exist(
+    manifest: dict[str, dict[int, str]],
+    worksheet_titles: list[str],
+) -> bool:
+    if not manifest or any(title not in manifest for title in worksheet_titles):
+        return False
+
+    return all(
+        (IMAGE_DIR / url.rsplit('/', 1)[-1]).is_file()
+        for title in worksheet_titles
+        for url in manifest[title].values()
+    )
 
 
 def export_xlsx(client: gspread.Client, spreadsheet_id: str) -> bytes:
+    last_error: RequestException | None = None
+    for attempt in range(3):
+        try:
+            return _export_xlsx(client, spreadsheet_id)
+        except RequestException as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+
+    assert last_error is not None
+    raise last_error
+
+
+def _export_xlsx(client: gspread.Client, spreadsheet_id: str) -> bytes:
     response = client.http_client.session.get(
         f'https://www.googleapis.com/drive/v3/files/{spreadsheet_id}/export',
         params={
@@ -45,14 +131,14 @@ def export_xlsx(client: gspread.Client, spreadsheet_id: str) -> bytes:
                 'spreadsheetml.sheet'
             ),
         },
-        timeout=(20, 180),
+        timeout=(20, 240),
     )
 
     if response.status_code == 403 and 'exportSizeLimitExceeded' in response.text:
         response = client.http_client.session.get(
             f'https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export',
             params={'format': 'xlsx'},
-            timeout=(20, 180),
+            timeout=(20, 240),
         )
 
     response.raise_for_status()
