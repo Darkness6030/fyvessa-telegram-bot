@@ -524,6 +524,7 @@ def _load_catalog() -> CatalogSource:
             title: all_values[title]
             for title in control_worksheets
         }
+
         product_values = {
             worksheet.title: all_values[worksheet.title]
             for worksheet in product_worksheets
@@ -551,9 +552,10 @@ def _load_catalog() -> CatalogSource:
         image_urls = load_manifest()
 
         product_rows = []
-        product_updates: dict[str, list[CellUpdate]] = {}
+        product_updates = {}
         corrected_product_rows = 0
-        seen_skus: set[str] = set()
+
+        seen_skus = set()
         for worksheet in product_worksheets:
             normalized = _normalize_products(
                 product_values[worksheet.title],
@@ -606,9 +608,7 @@ async def load_catalog_source() -> CatalogSource:
 
 def _load_store_settings() -> StoreSettings:
     if not CREDENTIALS_PATH.is_file():
-        raise SettingsValidationError(
-            f'Google credentials file not found: {CREDENTIALS_PATH}',
-        )
+        raise SettingsValidationError(f'Google credentials file not found: {CREDENTIALS_PATH}')
 
     try:
         client = gspread.service_account(filename=str(CREDENTIALS_PATH))
@@ -617,9 +617,11 @@ def _load_store_settings() -> StoreSettings:
         values = worksheet.get_all_values(
             value_render_option=ValueRenderOption.unformatted,
         )
+
         settings, updates = _normalize_settings(values)
         _write(worksheet, updates)
         return settings
+
     except gspread.SpreadsheetNotFound as exc:
         raise SettingsValidationError(
             f'Google spreadsheet {SPREADSHEET_TITLE!r} was not found or not shared '
