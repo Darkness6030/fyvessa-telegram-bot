@@ -47,12 +47,6 @@ def cache_spreadsheet_images(
     spreadsheet_id: str,
     worksheet_titles: list[str],
 ) -> dict[str, dict[int, str]]:
-    """Extract full-size cell images and return their public URLs by sheet/row.
-
-    The Sheets values API does not expose images placed directly in cells. Google
-    does include their original bytes in an XLSX export, so the catalog keeps the
-    image cells intact and extracts them during each sync.
-    """
     try:
         exported = embedded_images(export_xlsx(client, spreadsheet_id))
         manifest = _cache_images(exported, worksheet_titles)
@@ -76,15 +70,16 @@ def _cache_images(
     for title in worksheet_titles:
         images = exported.get(title) or exported.get(_xlsx_title(title), {})
         row_urls = manifest.setdefault(title, {})
-        for (row, column), data in images.items():
+        for (row, column), image_data in images.items():
             if column != 1:
                 continue
 
-            digest = hashlib.sha256(data).hexdigest()[:24]
-            filename = f'{digest}{image_suffix(data)}'
-            path = IMAGE_DIR / filename
-            if not path.is_file() or path.stat().st_size != len(data):
-                path.write_bytes(data)
+            digest = hashlib.sha256(image_data).hexdigest()[:24]
+            filename = f'{digest}{image_suffix(image_data)}'
+            image_path = IMAGE_DIR / filename
+            if not image_path.is_file() or image_path.stat().st_size != len(image_data):
+                image_path.write_bytes(image_data)
+
             row_urls[row] = f'{URL_PREFIX}/{filename}'
 
     return manifest

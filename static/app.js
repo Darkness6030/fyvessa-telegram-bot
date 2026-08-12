@@ -105,11 +105,11 @@ function showFragmentLoading(container) {
 function showFragmentError(container, error) {
     container.innerHTML = `
         <div class="rounded-[2rem] border border-coral/30 bg-white p-8 text-center shadow-soft">
-            <p class="text-3xl">!</p>
             <h2 class="mt-3 text-xl font-black">Не удалось загрузить раздел</h2>
             <p data-fragment-error class="mt-2 text-black/55"></p>
             <button type="button" data-fragment-retry class="mt-5 rounded-full bg-ink px-5 py-3 font-bold text-white">Повторить</button>
         </div>`;
+
     container.querySelector('[data-fragment-error]').textContent = error.message;
     container.querySelector('[data-fragment-retry]').addEventListener(
         'click',
@@ -135,6 +135,7 @@ function captureFragmentState(container) {
         });
         if (control === document.activeElement) focusKey = key;
     });
+
     return {controls, focusKey};
 }
 
@@ -152,6 +153,7 @@ function restoreFragmentState(container, snapshot) {
         } else {
             control.value = saved.value;
         }
+
         if (key === snapshot.focusKey) {
             control.focus({preventScroll: true});
             if (saved.selectionStart !== null && control.setSelectionRange) {
