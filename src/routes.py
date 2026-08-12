@@ -666,4 +666,10 @@ async def report_order_payment(order_id: int, user: RequestUser) -> ReportPaymen
 @plugin.setup()
 def include_router(app: FastAPI) -> None:
     app.mount('/static', StaticFiles(directory=Path('static')), name='static')
+    app.mount(
+        '/catalog/images',
+        StaticFiles(directory=Path('assets/catalog'), check_dir=False),
+        name='catalog_images',
+    )
+
     app.include_router(router)

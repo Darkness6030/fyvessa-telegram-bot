@@ -1,20 +1,13 @@
 import asyncio
-import hashlib
 import re
-import unicodedata
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
 from urllib.parse import urlsplit
 
 import gspread
-from gspread.utils import (
-    ValidationConditionType,
-    ValueInputOption,
-    ValueRenderOption,
-    a1_range_to_grid_range,
-)
+from gspread.utils import (a1_range_to_grid_range, ValidationConditionType, ValueInputOption, ValueRenderOption)
 
 from src.catalog import (
     CatalogRow,
@@ -24,80 +17,13 @@ from src.catalog import (
     OwnerRow,
 )
 from src.settings import SettingsValidationError, StoreSettings
+from src.sheet_images import load_manifest
+from src.sheet_schema import (as_decimal, as_money, MAX_MONEY, normalize_sku, OWNERS, PRODUCTS, SETTINGS, sheet_value, SheetSpec)
 
 SPREADSHEET_TITLE = 'Fyvessa Admin'
 CREDENTIALS_PATH = Path('assets/credentials.json')
-MONEY_QUANT = Decimal('0.01')
-MAX_MONEY = Decimal('9999999999.99')
-
-
-@dataclass(frozen=True)
-class SheetSpec:
-    title: str
-    columns: tuple[str, ...]
-    aliases: dict[str, str]
-    checkbox_fields: tuple[str, ...] = ()
-
-
-PRODUCTS = SheetSpec(
-    title='products',
-    columns=(
-        'sku', 'name', 'category', 'description', 'characteristics',
-        'retail_price', 'wholesale_price', 'discount_price', 'image_url',
-        'is_active', 'is_popular', 'is_recommended', 'owner',
-    ),
-    aliases={
-        'артикул': 'sku',
-        'название': 'name',
-        'категория': 'category',
-        'описание': 'description',
-        'характеристики': 'characteristics',
-        'розничная цена': 'retail_price',
-        'закупочная цена': 'wholesale_price',
-        'оптовая цена': 'wholesale_price',
-        'цена со скидкой': 'discount_price',
-        'изображение': 'image_url',
-        'активен': 'is_active',
-        'популярный': 'is_popular',
-        'рекомендуемый': 'is_recommended',
-        'владелец': 'owner',
-    },
-    checkbox_fields=('is_active', 'is_popular', 'is_recommended'),
-)
-CATEGORIES = SheetSpec(
-    title='categories',
-    columns=('name', 'image_url', 'is_active'),
-    aliases={
-        'категория': 'name',
-        'название': 'name',
-        'изображение': 'image_url',
-        'изображение категории': 'image_url',
-        'активна': 'is_active',
-        'активен': 'is_active',
-    },
-    checkbox_fields=('is_active',),
-)
-OWNERS = SheetSpec(
-    title='owners',
-    columns=('name', 'share_percent', 'is_active'),
-    aliases={
-        'владелец': 'name',
-        'имя': 'name',
-        'доля': 'share_percent',
-        'процент': 'share_percent',
-        'доля владельца': 'share_percent',
-        'активен': 'is_active',
-    },
-    checkbox_fields=('is_active',),
-)
-SETTINGS = SheetSpec(
-    title='settings',
-    columns=('key', 'value', 'description'),
-    aliases={
-        'ключ': 'key',
-        'значение': 'value',
-        'описание': 'description',
-    },
+CONTROL_SHEET_TITLES = frozenset(
+    {PRODUCTS.title, 'categories', OWNERS.title, SETTINGS.title}
 )
 
 SETTING_DESCRIPTIONS = {
@@ -106,6 +32,7 @@ SETTING_DESCRIPTIONS = {
     'support_url': 'Ссылка на поддержку или @username',
     'payment_details': 'Реквизиты для оплаты (можно в несколько строк)',
 }
+
 SETTING_ALIASES = {
     'основной канал': 'channel_url',
     'канал': 'channel_url',
@@ -206,45 +133,6 @@ def _as_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _as_decimal(value: Any) -> Optional[Decimal]:
-    normalized = ('' if value is None else str(value)).strip().casefold()
-    for token in ('\u00a0', ' ', '₽', 'рублей', 'рубля', 'руб.', 'руб', '%'):
-        normalized = normalized.replace(token, '')
-
-    if not normalized:
-        return None
-
-    try:
-        result = Decimal(normalized.replace(',', '.'))
-        return result if result.is_finite() else None
-    except InvalidOperation:
-        return None
-
-
-def _as_money(value: Any) -> Optional[Decimal]:
-    result = _as_decimal(value)
-    if result is None or abs(result) > MAX_MONEY:
-        return result
-
-    try:
-        return result.quantize(MONEY_QUANT)
-    except InvalidOperation:
-        return None
-
-
-def _sheet_value(field: str, value: Any) -> Any:
-    if field in {'retail_price', 'wholesale_price', 'discount_price', 'share_percent', }:
-        if value is None:
-            return ''
-
-        return int(value) if value == value.to_integral_value() else float(value)
-
-    if field in {'is_active', 'is_popular', 'is_recommended'}:
-        return bool(value)
-
-    return '' if value is None else str(value)
-
-
 def _changed(raw: Any, normalized: Any) -> bool:
     if isinstance(normalized, bool):
         return not isinstance(raw, bool) or raw is not normalized
@@ -260,9 +148,9 @@ def _row_updates(
     columns: dict[str, int],
 ) -> list[CellUpdate]:
     return [
-        CellUpdate(row_number, columns[field], _sheet_value(field, value))
+        CellUpdate(row_number, columns[field], sheet_value(field, value))
         for field, value in normalized.items()
-        if _changed(raw.get(field), _sheet_value(field, value))
+        if _changed(raw.get(field), sheet_value(field, value))
     ]
 
 
@@ -303,6 +191,19 @@ def _normalize_link(value: Any) -> str:
         return ''
 
     return link.rstrip('/')
+
+
+def _image_reference(value: Any) -> Optional[str]:
+    reference = str(value or '').strip()
+    if not reference:
+        return None
+    if reference.startswith('/'):
+        return reference
+
+    parsed = urlsplit(reference)
+    if parsed.scheme in {'http', 'https'} and parsed.hostname:
+        return reference
+    return None
 
 
 def _normalize_settings(
@@ -351,44 +252,6 @@ def _normalize_settings(
     return StoreSettings.model_validate(setting_values), updates
 
 
-def _normalize_sku(value: Any, name: str, category: str) -> str:
-    original = str(value or '').strip()
-    normalized = unicodedata.normalize('NFKD', original)
-    normalized = normalized.encode('ascii', 'ignore').decode().upper()
-    normalized = re.sub(r'[^A-Z0-9._-]+', '-', normalized).strip('-._')
-
-    if original.isascii() and normalized:
-        return normalized[:100]
-
-    digest = hashlib.sha1(f'{name}\0{category}'.encode()).hexdigest()[:10].upper()
-    return f'ITEM-{digest}'
-
-
-def _normalize_categories(values: list[list[Any]]) -> Normalized[CategoryRow]:
-    columns, updates = _columns(values, CATEGORIES)
-    category_rows = []
-
-    seen_categories = set()
-    for row_number, values_row in enumerate(values[1:], start=2):
-        if not _has_values(values_row):
-            continue
-
-        raw_data = _raw_row(values_row, columns)
-        category_name = str(raw_data['name'] or '').strip()
-
-        category_data = {
-            'name': _unique(category_name or f'Категория {row_number}', seen_categories),
-            'image_url': str(raw_data['image_url'] or '').strip() or None,
-            'is_active': False if not category_name else _as_bool(raw_data['is_active'], True),
-        }
-
-        category_row = CategoryRow.model_validate(category_data)
-        category_rows.append(category_row)
-        updates.extend(_row_updates(row_number, raw_data, category_data, columns))
-
-    return Normalized(category_rows, updates)
-
-
 def _normalize_owners(values: list[list[Any]]) -> Normalized[OwnerRow]:
     columns, updates = _columns(values, OWNERS)
     owner_rows = []
@@ -400,7 +263,7 @@ def _normalize_owners(values: list[list[Any]]) -> Normalized[OwnerRow]:
 
         raw_data = _raw_row(values_row, columns)
         category_name = str(raw_data['name'] or '').strip().capitalize()
-        share_percent = _as_decimal(raw_data['share_percent'])
+        share_percent = as_decimal(raw_data['share_percent'])
         share_percent = min(max(share_percent or Decimal('70'), Decimal('0')), Decimal('100'))
 
         owner_data = {
@@ -417,9 +280,9 @@ def _normalize_owners(values: list[list[Any]]) -> Normalized[OwnerRow]:
 
 
 def _normalize_prices(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    retail = _as_money(raw['retail_price'])
-    wholesale = _as_money(raw['wholesale_price'])
-    discount = _as_money(raw['discount_price'])
+    retail = as_money(raw['retail_price'])
+    wholesale = as_money(raw['wholesale_price'])
+    discount = as_money(raw['discount_price'])
 
     is_unsafe = False
     if wholesale is None or wholesale < 0:
@@ -443,37 +306,36 @@ def _normalize_prices(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     }, is_unsafe
 
 
-def _default_owner(category: str, owners: list[OwnerRow]) -> OwnerRow:
-    preferred = 'Диана' if category.casefold() == 'духи' else 'Булат'
+def _default_owner(owners: list[OwnerRow]) -> OwnerRow:
     return next(
-        (owner for owner in owners if owner.name.casefold() == preferred.casefold()),
+        (owner for owner in owners if owner.name.casefold() == 'булат'),
         next((owner for owner in owners if owner.is_active), owners[0]),
     )
 
 
 def _normalize_products(
     values: list[list[Any]],
-    categories: list[CategoryRow],
+    category: CategoryRow,
     owners: list[OwnerRow],
+    embedded_image_urls: Optional[dict[int, str]] = None,
+    seen_skus: Optional[set[str]] = None,
 ) -> Normalized[CatalogRow]:
     columns, updates = _columns(values, PRODUCTS)
-    category_by_name = {category.name.casefold(): category for category in categories}
     owner_by_name = {owner.name.casefold(): owner for owner in owners}
     catalog_rows = []
+    embedded_image_urls = embedded_image_urls or {}
 
-    seen_skus = set()
+    seen_skus = seen_skus if seen_skus is not None else set()
     for row_number, values_row in enumerate(values[1:], start=2):
         if not _has_values(values_row):
             continue
 
         raw_data = _raw_row(values_row, columns)
         product_name = str(raw_data['name'] or '').strip()
-        category_name = str(raw_data['category'] or '').strip() or 'Без категории'
-        category = category_by_name.get(category_name.casefold()) or CategoryRow(
-            name=category_name,
-        )
+        if not product_name and not str(raw_data['sku'] or '').strip():
+            continue
 
-        product_sku = _normalize_sku(raw_data['sku'], product_name, category.name)
+        product_sku = normalize_sku(raw_data['sku'], product_name, category.name)
         base_sku = product_sku
 
         sku_suffix = 2
@@ -489,18 +351,18 @@ def _normalize_products(
         is_unsafe |= prices_unsafe
 
         owner_name = str(raw_data['owner'] or '').strip().capitalize()
-        owner = owner_by_name.get(owner_name.casefold()) or _default_owner(
-            category.name, owners,
-        )
+        owner = owner_by_name.get(owner_name.casefold()) or _default_owner(owners)
 
         sheet_data = {
             'sku': product_sku,
             'name': product_name,
-            'category': category.name,
             'description': str(raw_data['description'] or '').strip(),
             'characteristics': str(raw_data['characteristics'] or '').strip(),
             **prices,
-            'image_url': str(raw_data['image_url'] or '').strip() or None,
+            'image_url': (
+                embedded_image_urls.get(row_number)
+                or _image_reference(raw_data['image_url'])
+            ),
             'is_active': False if is_unsafe else _as_bool(raw_data['is_active'], True),
             'is_popular': _as_bool(raw_data['is_popular'], False),
             'is_recommended': _as_bool(raw_data['is_recommended'], False),
@@ -509,6 +371,7 @@ def _normalize_products(
 
         catalog_row = CatalogRow.model_validate({
             **sheet_data,
+            'category': category.name,
             'category_image_url': category.image_url,
             'owner_share_percent': owner.share_percent,
         })
@@ -517,7 +380,15 @@ def _normalize_products(
             'is_active': catalog_row.is_active and category.is_active and owner.is_active,
         }))
 
-        updates.extend(_row_updates(row_number, raw_data, sheet_data, columns))
+        writable_data = sheet_data
+        if row_number in embedded_image_urls:
+            writable_data = {
+                field: value
+                for field, value in sheet_data.items()
+                if field != 'image_url'
+            }
+
+        updates.extend(_row_updates(row_number, raw_data, writable_data, columns))
 
     if not catalog_rows:
         raise CatalogValidationError('The products worksheet contains no products')
@@ -525,25 +396,42 @@ def _normalize_products(
     return Normalized(catalog_rows, updates)
 
 
-def _product_category_names(values: list[list[Any]]) -> list[str]:
-    columns, _ = _columns(values, PRODUCTS)
-    return [
-        str(_raw_row(row, columns)['category'] or '').strip() or 'Без категории'
-        for row in values[1:]
-        if _has_values(row)
-    ]
-
-
 def _worksheet(spreadsheet: gspread.Spreadsheet, spec: SheetSpec) -> gspread.Worksheet:
     try:
         return spreadsheet.worksheet(spec.title)
     except gspread.WorksheetNotFound:
-        if spec is PRODUCTS and len(spreadsheet.worksheets()) == 1:
-            worksheet = spreadsheet.sheet1
-            worksheet.update_title(spec.title)
-            return worksheet
-
         return spreadsheet.add_worksheet(title=spec.title, rows=1000, cols=len(spec.columns), )
+
+
+def _product_worksheets(spreadsheet: gspread.Spreadsheet) -> list[gspread.Worksheet]:
+    return [
+        worksheet
+        for worksheet in spreadsheet.worksheets()
+        if worksheet.title.casefold() not in CONTROL_SHEET_TITLES
+    ]
+
+
+def _sheet_range(title: str) -> str:
+    return f"'{title.replace(chr(39), chr(39) * 2)}'"
+
+
+def _worksheet_values(
+    spreadsheet: gspread.Spreadsheet,
+    worksheets: list[gspread.Worksheet],
+) -> dict[str, list[list[Any]]]:
+    response = spreadsheet.values_batch_get(
+        [_sheet_range(worksheet.title) for worksheet in worksheets],
+        params={'valueRenderOption': ValueRenderOption.unformatted.value},
+    )
+    value_ranges = response.get('valueRanges', [])
+    return {
+        worksheet.title: (
+            value_ranges[index].get('values', [])
+            if index < len(value_ranges)
+            else []
+        )
+        for index, worksheet in enumerate(worksheets)
+    }
 
 
 def _write(worksheet: gspread.Worksheet, updates: list[CellUpdate]) -> None:
@@ -567,19 +455,10 @@ def _write(worksheet: gspread.Worksheet, updates: list[CellUpdate]) -> None:
     )
 
 
-def _absolute_a1(row: int, column: int) -> str:
-    match = re.fullmatch(r'([A-Z]+)(\d+)', gspread.utils.rowcol_to_a1(row, column))
-    if match is None:
-        raise ValueError('Could not build an A1 range')
-
-    return f'${match.group(1)}${match.group(2)}'
-
-
 def _validation(
     worksheet: gspread.Worksheet,
     range_name: str,
     kind: ValidationConditionType,
-    values: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     return {
         'setDataValidation': {
@@ -587,9 +466,6 @@ def _validation(
             'rule': {
                 'condition': {
                     'type': kind.value,
-                    'values': [
-                        {'userEnteredValue': value} for value in (values or [])
-                    ],
                 },
                 'showCustomUi': True,
                 'strict': True,
@@ -600,20 +476,20 @@ def _validation(
 
 def _apply_validations(
     spreadsheet: gspread.Spreadsheet,
-    worksheets: dict[str, gspread.Worksheet],
-    values: dict[str, list[list[Any]]],
+    control_worksheets: dict[str, gspread.Worksheet],
+    control_values: dict[str, list[list[Any]]],
 ) -> None:
-    column_maps = {
-        spec.title: _columns(values[spec.title], spec)[0]
-        for spec in (PRODUCTS, CATEGORIES, OWNERS)
+    control_column_maps = {
+        spec.title: _columns(control_values[spec.title], spec)[0]
+        for spec in (OWNERS,)
     }
 
     requests = []
-    for spec in (PRODUCTS, CATEGORIES, OWNERS):
-        worksheet = worksheets[spec.title]
+    for spec in (OWNERS,):
+        worksheet = control_worksheets[spec.title]
         last_row = worksheet.row_count
         for field in spec.checkbox_fields:
-            column = column_maps[spec.title][field]
+            column = control_column_maps[spec.title][field]
             requests.append(_validation(
                 worksheet,
                 f'{gspread.utils.rowcol_to_a1(2, column)}:'
@@ -621,25 +497,8 @@ def _apply_validations(
                 ValidationConditionType.boolean,
             ))
 
-    product_sheet = worksheets[PRODUCTS.title]
-    for field, reference in (('category', CATEGORIES), ('owner', OWNERS)):
-        target_column = column_maps[PRODUCTS.title][field]
-        source_column = column_maps[reference.title]['name']
-        source_last_row = worksheets[reference.title].row_count
-        source_range = (
-            f"='{reference.title}'!{_absolute_a1(2, source_column)}:"
-            f'{_absolute_a1(source_last_row, source_column)}'
-        )
-
-        requests.append(_validation(
-            product_sheet,
-            f'{gspread.utils.rowcol_to_a1(2, target_column)}:'
-            f'{gspread.utils.rowcol_to_a1(product_sheet.row_count, target_column)}',
-            ValidationConditionType.one_of_range,
-            [source_range],
-        ))
-
-    spreadsheet.batch_update({'requests': requests})
+    if requests:
+        spreadsheet.batch_update({'requests': requests})
 
 
 def _load_catalog() -> CatalogSource:
@@ -649,75 +508,79 @@ def _load_catalog() -> CatalogSource:
     try:
         client = gspread.service_account(filename=str(CREDENTIALS_PATH))
         spreadsheet = client.open(SPREADSHEET_TITLE)
-        worksheets = {
+        control_worksheets = {
             spec.title: _worksheet(spreadsheet, spec)
-            for spec in (PRODUCTS, CATEGORIES, OWNERS)
+            for spec in (OWNERS,)
+        }
+        product_worksheets = _product_worksheets(spreadsheet)
+        if not product_worksheets:
+            raise CatalogValidationError(
+                'Google spreadsheet contains no category worksheets',
+            )
+
+        all_catalog_worksheets = [*control_worksheets.values(), *product_worksheets]
+        all_values = _worksheet_values(spreadsheet, all_catalog_worksheets)
+        control_values = {
+            title: all_values[title]
+            for title in control_worksheets
+        }
+        product_values = {
+            worksheet.title: all_values[worksheet.title]
+            for worksheet in product_worksheets
         }
 
-        values = {
-            title: worksheet.get_all_values(value_render_option=ValueRenderOption.unformatted)
-            for title, worksheet in worksheets.items()
-        }
-
-        if not _has_records(values[OWNERS.title]):
-            values[OWNERS.title] = [
+        if not _has_records(control_values[OWNERS.title]):
+            control_values[OWNERS.title] = [
                 list(OWNERS.columns),
                 ['Диана', 70, True],
                 ['Булат', 70, True],
             ]
 
-            worksheets[OWNERS.title].update(
-                range_name='A1', values=values[OWNERS.title],
+            control_worksheets[OWNERS.title].update(
+                range_name='A1', values=control_values[OWNERS.title],
                 value_input_option=ValueInputOption.raw,
             )
 
-        if not _has_records(values[PRODUCTS.title]):
-            values[PRODUCTS.title] = [list(PRODUCTS.columns)]
-            worksheets[PRODUCTS.title].update(
-                range_name='A1', values=values[PRODUCTS.title],
-                value_input_option=ValueInputOption.raw,
-            )
-
-            _apply_validations(spreadsheet, worksheets, values)
-            raise CatalogValidationError('Google products worksheet contained no rows; headers were created')
-
-        categories = _normalize_categories(values[CATEGORIES.title])
-        known_categories = {
-            row.name.casefold()
-            for row in categories.rows
+        categories = [CategoryRow(name=worksheet.title) for worksheet in product_worksheets]
+        category_by_name = {
+            category.name.casefold(): category
+            for category in categories
         }
+        owners = _normalize_owners(control_values[OWNERS.title])
 
-        next_row = max(len(values[CATEGORIES.title]) + 1, 2)
-        for name in _product_category_names(values[PRODUCTS.title]):
-            if name.casefold() in known_categories:
-                continue
+        image_urls = load_manifest()
 
-            row = CategoryRow(name=name)
-            categories.rows.append(row)
-            categories.updates.extend(
-                CellUpdate(next_row, column, _sheet_value(field, getattr(row, field)))
-                for column, field in enumerate(CATEGORIES.columns, start=1)
+        product_rows = []
+        product_updates: dict[str, list[CellUpdate]] = {}
+        corrected_product_rows = 0
+        seen_skus: set[str] = set()
+        for worksheet in product_worksheets:
+            normalized = _normalize_products(
+                product_values[worksheet.title],
+                category_by_name[worksheet.title.casefold()],
+                owners.rows,
+                image_urls.get(worksheet.title),
+                seen_skus,
             )
+            product_rows.extend(normalized.rows)
+            product_updates[worksheet.title] = normalized.updates
+            corrected_product_rows += normalized.corrected_rows
 
-            known_categories.add(name.casefold())
-            next_row += 1
+        _write(control_worksheets[OWNERS.title], owners.updates)
+        for worksheet in product_worksheets:
+            _write(worksheet, product_updates[worksheet.title])
 
-        owners = _normalize_owners(values[OWNERS.title])
-        products = _normalize_products(
-            values[PRODUCTS.title], categories.rows, owners.rows,
+        _apply_validations(
+            spreadsheet,
+            control_worksheets,
+            control_values,
         )
 
-        _write(worksheets[CATEGORIES.title], categories.updates)
-        _write(worksheets[OWNERS.title], owners.updates)
-        _write(worksheets[PRODUCTS.title], products.updates)
-        _apply_validations(spreadsheet, worksheets, values)
-
         return CatalogSource(
-            products=products.rows,
-            categories=categories.rows,
+            products=product_rows,
+            categories=categories,
             corrected_rows=(
-                products.corrected_rows
-                + categories.corrected_rows
+                corrected_product_rows
                 + owners.corrected_rows
             ),
         )
