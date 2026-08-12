@@ -173,6 +173,12 @@ ADMIN_TEXT = (
     'операции выполняются здесь.'
 )
 
+SYNC_STARTED_TEXT = (
+    '🔄 <b>Синхронизация запущена</b>\n\n'
+    'Загружаем таблицу, товары и изображения. Это может занять несколько минут. '
+    'Пожалуйста, дождитесь итогового сообщения и не запускайте синхронизацию повторно.'
+)
+
 
 async def _edit_message(callback: CallbackQuery, text: str, reply_markup=None):
     try:
@@ -314,7 +320,11 @@ async def _sync_text() -> str:
 
 @router.message(Command('sync_products'))
 async def sync_products_command(message: Message):
-    await _answer_with_navigation(message, await _sync_text())
+    status_message = await message.answer(SYNC_STARTED_TEXT)
+    await status_message.edit_text(
+        await _sync_text(),
+        reply_markup=_back_keyboard(),
+    )
 
 
 async def _user_text(user: User) -> str:
@@ -639,6 +649,8 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
     if callback_data.section == 'menu':
         await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
     elif callback_data.section == 'sync':
+        await callback.answer('Синхронизация запущена')
+        await _edit_message(callback, SYNC_STARTED_TEXT)
         await _edit_message(callback, await _sync_text(), _back_keyboard())
     elif callback_data.section == 'help':
         await _edit_message(callback, _help_text(), _back_keyboard())
