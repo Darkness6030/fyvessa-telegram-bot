@@ -3,6 +3,7 @@ if (tg) {
     for (const [method, args] of [
         ['ready', []],
         ['expand', []],
+        ['disableVerticalSwipes', []],
         ['setHeaderColor', ['#f5f1e8']],
         ['setBackgroundColor', ['#f5f1e8']]
     ]) {
