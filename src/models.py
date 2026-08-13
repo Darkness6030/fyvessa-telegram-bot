@@ -334,6 +334,10 @@ class Promocode(SQLModel, table=True):
             .all()
         )
 
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
+
 
 class Order(SQLModel, table=True):
     id: int = Field(primary_key=True)

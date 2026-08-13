@@ -1,4 +1,5 @@
 import html
+from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -233,6 +234,101 @@ def _back_keyboard(section: str = 'menu', page: int = 0):
         ),
         ('🏠 Меню', AdminSectionCallback(section='menu')),
     ])
+
+
+def _rubles(value: Decimal) -> str:
+    value = value.quantize(Decimal('0.01'))
+    formatted = f'{value:,.2f}'.replace(',', ' ').replace('.', ',')
+    return f'{formatted.removesuffix(',00')} ₽'
+
+
+async def _financial_summary(orders: list[Order]) -> str:
+    paid_orders = [order for order in orders if order.payment_status == 'paid']
+    unpaid_orders = [
+        order for order in orders
+        if order.payment_status not in {'paid', 'cancelled'}
+    ]
+    total = lambda field: sum(
+        (getattr(order, field) for order in paid_orders), Decimal('0'),
+    )
+
+    owner_earnings = {
+        'Диана': total('diana_share'),
+        'Булат': total('bulat_share'),
+    }
+    promocodes = {
+        promocode.id: promocode
+        for promocode in await Promocode.get_all()
+    }
+    partner_debts = defaultdict(lambda: Decimal('0'))
+    partner_orders = defaultdict(int)
+    unknown_partner_debt = Decimal('0')
+    for order in paid_orders:
+        if not order.partner_reward:
+            continue
+        promocode = promocodes.get(order.promo_code_id)
+        if not promocode:
+            unknown_partner_debt += order.partner_reward
+            continue
+        partner_name = promocode.partner_name.strip() or f'Промокод {promocode.code}'
+        partner_debts[partner_name] += order.partner_reward
+        partner_orders[partner_name] += 1
+
+    owner_lines = '\n'.join(
+        f'• {html.escape(name)}: <b>{_rubles(amount)}</b>'
+        for name, amount in owner_earnings.items()
+    )
+    partner_lines = '\n'.join(
+        f'• {html.escape(name)}: <b>{_rubles(amount)}</b> '
+        f'({partner_orders[name]} заказов)'
+        for name, amount in sorted(partner_debts.items())
+    )
+    if unknown_partner_debt:
+        partner_lines += (
+            ('\n' if partner_lines else '')
+            + f'• Удалённые промокоды: <b>{_rubles(unknown_partner_debt)}</b>'
+        )
+    partner_lines = partner_lines or '• Выплат пока нет'
+
+    product_discounts = total('product_discount_total')
+    order_discounts = sum(
+        (
+            order.subtotal
+            - order.product_discount_total
+            - order.paid_total
+            - order.coins_used
+            for order in paid_orders
+        ),
+        Decimal('0'),
+    )
+    paid_total = total('paid_total')
+    owner_total = sum(owner_earnings.values(), Decimal('0'))
+    partner_total = total('partner_reward')
+    average_order = paid_total / len(paid_orders) if paid_orders else Decimal('0')
+    awaiting_total = sum(
+        (order.paid_total for order in unpaid_orders), Decimal('0'),
+    )
+    return (
+        '<b>Финансы по подтверждённым оплатам</b>\n'
+        f'Сформировано: {datetime.now():%d.%m.%Y %H:%M}\n'
+        f'Оплаченных заказов: <b>{len(paid_orders)}</b>\n'
+        f'Оборот: <b>{_rubles(paid_total)}</b>\n'
+        f'Средний чек: <b>{_rubles(average_order)}</b>\n'
+        f'Себестоимость: <b>{_rubles(total('wholesale_total'))}</b>\n'
+        f'Скидки на товары: <b>{_rubles(product_discounts)}</b>\n'
+        f'Персональные скидки/промокоды: <b>{_rubles(order_discounts)}</b>\n'
+        f'Списано коинов: <b>{_rubles(total('coins_used'))}</b>\n'
+        f'Прибыль товаров: <b>{_rubles(total('net_profit'))}</b>\n'
+        f'Ожидается оплат: <b>{_rubles(awaiting_total)}</b> '
+        f'({len(unpaid_orders)} заказов)\n\n'
+        '<b>К выплате владельцам (за всю историю)</b>\n'
+        f'{owner_lines}\n'
+        f'Итого владельцам: <b>{_rubles(owner_total)}</b>\n\n'
+        '<b>К выплате промопартнёрам</b>\n'
+        f'{partner_lines}\n'
+        f'Итого промопартнёрам: <b>{_rubles(partner_total)}</b>\n\n'
+        '<i>Выплаты вручную не списываются: показаны все начисления за историю.</i>'
+    )
 
 
 async def _answer_with_navigation(message: Message, text: str, section: str = 'menu'):
@@ -730,10 +826,7 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
         )
 
         review = [order for order in orders if order.status == 'payment_review']
-        paid_total = sum(
-            (order.paid_total for order in orders if order.payment_status == 'paid'),
-            Decimal('0'),
-        )
+        financial_summary = await _financial_summary(orders)
 
         await _edit_message(
             callback,
@@ -743,7 +836,7 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
             f'Заказов: {len(orders)}\n'
             f'Оплат на проверке: {len(review)}\n'
             f'Запросов наличия без ответа: {len(pending)}\n'
-            f'Подтверждено оплат: {paid_total} ₽',
+            f'\n{financial_summary}',
             _back_keyboard(),
         )
 
