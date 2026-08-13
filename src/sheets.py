@@ -15,7 +15,7 @@ from src.catalog import (
     OwnerRow,
 )
 from src.sheet_images import cache_spreadsheet_images
-from src.sheet_utils import (as_bool, as_decimal, as_money, columns as resolve_columns, CREDENTIALS_PATH, get_worksheet, has_records, has_values, MAX_MONEY, normalize_sku, Normalized, OWNERS, OWNERS_SHEET, PRODUCTS, raw_row as extract_row, RESERVED_SHEET_TITLES, row_updates, SPREADSHEET_TITLE, unique, worksheet_values, write_updates)
+from src.sheet_utils import (as_bool, as_decimal, as_money, columns as resolve_columns, CREDENTIALS_PATH, ensure_checkboxes, get_worksheet, has_records, has_values, MAX_MONEY, normalize_sku, Normalized, OWNERS, OWNERS_SHEET, PRODUCTS, raw_row as extract_row, RESERVED_SHEET_TITLES, row_updates, SPREADSHEET_TITLE, unique, worksheet_values, write_updates)
 
 TECHNICAL_CHARACTERISTIC_LABELS = frozenset({
     'доставка',
@@ -170,7 +170,7 @@ def _normalize_products(
             ),
             'is_active': False if is_unsafe else as_bool(raw_data['is_active'], True),
             'is_popular': as_bool(raw_data['is_popular'], False),
-            'is_recommended': as_bool(raw_data['is_recommended'], False),
+            'is_new': as_bool(raw_data['is_new'], False),
             'owner': owner.name,
         }
 
@@ -275,8 +275,12 @@ def _load_catalog() -> CatalogSource:
             corrected_product_rows += normalized.corrected_rows
 
         write_updates(owners_worksheet, owners.updates)
+        checkbox_worksheets = []
         for worksheet in product_worksheets:
             write_updates(worksheet, product_updates[worksheet.title])
+            column_map, _ = resolve_columns(all_values[worksheet.title], PRODUCTS)
+            checkbox_worksheets.append((worksheet, column_map))
+        ensure_checkboxes(spreadsheet, checkbox_worksheets, PRODUCTS)
 
         return CatalogSource(
             products=product_rows,

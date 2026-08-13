@@ -13,10 +13,76 @@ if (tg) {
 const INIT_DATA_STORAGE_KEY = 'fyvessa.telegramInitData';
 const PROFILE_DRAFT_KEY = 'fyvessa.profileDraft';
 const CHECKOUT_DRAFT_KEY = 'fyvessa.checkoutDraft';
+const THEME_KEY = 'fyvessa.theme';
+const WELCOME_KEY = 'fyvessa.welcomeSeen';
 const fragmentRequests = new WeakMap();
 const cartUpdates = new Map();
 let navigationSequence = 0;
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+function applyTheme(theme) {
+    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = nextTheme;
+    const color = nextTheme === 'dark' ? '#121210' : '#f5f1e8';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+    document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+        button.textContent = nextTheme === 'dark' ? '☀' : '◐';
+        button.setAttribute('aria-label', nextTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему');
+    });
+    try {
+        tg?.setHeaderColor?.(color);
+        tg?.setBackgroundColor?.(color);
+    } catch (_) {}
+}
+
+function toggleTheme() {
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+    applyTheme(theme);
+}
+
+function initWelcome() {
+    const screen = document.querySelector('[data-welcome-screen]');
+    if (!screen) return;
+    let seen = false;
+    try { seen = localStorage.getItem(WELCOME_KEY) === 'true'; } catch (_) {}
+    if (seen) return;
+    screen.classList.add('is-visible');
+    document.body.style.overflow = 'hidden';
+}
+
+function startWelcome() {
+    try { localStorage.setItem(WELCOME_KEY, 'true'); } catch (_) {}
+    document.querySelector('[data-welcome-screen]')?.classList.remove('is-visible');
+    document.body.style.overflow = '';
+    navigateTo('/catalog');
+}
+
+function initAutoSliders(root = document) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    root.querySelectorAll('[data-auto-slider]').forEach((slider) => {
+        if (slider.__fyvessaSliderTimer) return;
+        const advance = () => {
+            if (!slider.isConnected) {
+                clearInterval(slider.__fyvessaSliderTimer);
+                return;
+            }
+            const firstCard = slider.firstElementChild;
+            if (!firstCard || slider.scrollWidth <= slider.clientWidth) return;
+            const step = firstCard.getBoundingClientRect().width + 12;
+            const atEnd = slider.scrollLeft + slider.clientWidth >= slider.scrollWidth - step / 2;
+            slider.scrollTo({left: atEnd ? 0 : slider.scrollLeft + step, behavior: 'smooth'});
+        };
+        const resume = () => {
+            clearInterval(slider.__fyvessaSliderTimer);
+            slider.__fyvessaSliderTimer = setInterval(advance, 3800);
+        };
+        slider.addEventListener('pointerdown', () => clearInterval(slider.__fyvessaSliderTimer));
+        slider.addEventListener('pointerup', resume);
+        slider.addEventListener('pointercancel', resume);
+        resume();
+    });
+}
 
 function initDataFromLocation() {
     for (const source of [location.hash.slice(1), location.search.slice(1)]) {
@@ -452,9 +518,6 @@ async function checkout(form) {
         await navigateTo(`/orders/${result.order_id}`);
     } catch (error) {
         showToast(error.message);
-        if (error.message.startsWith('Заполните')) {
-            setTimeout(() => navigateTo('/profile'), 900);
-        }
         button.disabled = false;
         button.textContent = originalText;
     }
@@ -569,6 +632,7 @@ async function hydratePage(root = document) {
     const profileForm = root.querySelector('#profile-form');
     if (restoreFormDraft(profileForm, PROFILE_DRAFT_KEY)) markProfileDirty(profileForm);
     restoreFormDraft(root.querySelector('#checkout-form'), CHECKOUT_DRAFT_KEY);
+    initAutoSliders(root);
     await refreshShopState();
     const product = root.querySelector('[data-record-product-view]');
     if (product) recordProductView(Number(product.dataset.recordProductView));
@@ -621,6 +685,14 @@ async function navigateTo(target, {push = true, scrollY = 0} = {}) {
 }
 
 document.addEventListener('click', (event) => {
+    if (event.target.closest?.('[data-theme-toggle]')) {
+        toggleTheme();
+        return;
+    }
+    if (event.target.closest?.('[data-welcome-start]')) {
+        startWelcome();
+        return;
+    }
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target.closest?.('a[href]');
     if (!link || link.dataset.noSoftNav !== undefined || link.target || link.download) return;
@@ -690,4 +762,6 @@ history.replaceState({
     scrollY: window.scrollY,
     navigationDepth: Number(history.state?.navigationDepth || 0)
 }, '');
+applyTheme(document.documentElement.dataset.theme);
+initWelcome();
 hydratePage();

@@ -5,6 +5,9 @@
   <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport">
   <meta content="#171714" name="theme-color">
   <title>{% block title %}Fyvessa{% endblock %}</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('fyvessa.theme') || 'light'; } catch (_) {}
+  </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -21,17 +24,18 @@
         }
     }
   </script>
-  <link href="/static/app.css?v=20260812-1" rel="stylesheet">
+  <link href="/static/app.css?v=20260813-1" rel="stylesheet">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
     <a class="text-xl font-black tracking-[-0.06em]" data-nav href="/">FYVESSA<span class="text-coral">.</span></a>
     <nav class="flex items-center gap-1 text-sm font-semibold" data-main-nav>
-      <a class="nav-link rounded-full px-3 py-2" data-nav href="/catalog">Каталог</a>
+      <a aria-label="Каталог" class="nav-link grid h-10 place-items-center rounded-full px-3" data-nav href="/catalog"><span class="hidden sm:inline">Каталог</span><span class="text-xl sm:hidden">⌕</span></a>
+      <button aria-label="Сменить цветовую тему" class="nav-link grid h-10 w-10 place-items-center rounded-full text-lg" data-theme-toggle type="button">◐</button>
       <a aria-label="Избранное" class="nav-link grid h-10 w-10 place-items-center rounded-full text-xl" data-nav href="/favorites">♡</a>
       <a aria-label="Профиль" class="nav-link grid h-10 w-10 place-items-center rounded-full" data-nav href="/profile">◉</a>
-      <a aria-label="Корзина" class="rounded-full bg-ink px-3 py-2 text-white" data-nav href="/cart" id="cart-link">Корзина <span class="hidden rounded-full bg-coral px-1.5 py-0.5 text-xs" data-cart-count>0</span></a>
+      <a aria-label="Корзина" class="flex h-10 items-center gap-1 rounded-full bg-ink px-3 text-white" data-nav href="/cart" id="cart-link"><span class="hidden sm:inline">Корзина</span><span class="text-lg sm:hidden">◒</span> <span class="hidden rounded-full bg-coral px-1.5 py-0.5 text-xs" data-cart-count>0</span></a>
     </nav>
   </div>
 </header>
@@ -44,8 +48,19 @@
     <a class="font-semibold text-ink" href="/recent">Недавно смотрели</a>
   </div>
 </footer>
+<div class="welcome-screen fixed inset-0 z-[100] hidden items-center justify-center bg-ink p-5 text-white" data-welcome-screen>
+  <div class="relative w-full max-w-lg overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 p-7 text-center shadow-2xl sm:p-10">
+    <div class="welcome-orb absolute -right-16 -top-16 h-44 w-44 rounded-full bg-coral"></div>
+    <div class="relative">
+      <p class="text-xs font-black uppercase tracking-[.3em] text-white/45">FYVESSA</p>
+      <h1 class="mt-5 text-4xl font-black leading-none tracking-[-.055em] sm:text-6xl">Добро пожаловать</h1>
+      <p class="mx-auto mt-5 max-w-sm leading-relaxed text-white/65">Каталог оригинальных товаров, проверка наличия и оформление заказа прямо внутри Telegram.</p>
+      <button class="mt-8 w-full rounded-2xl bg-coral py-4 text-lg font-black tracking-[.16em] text-white" data-welcome-start type="button">СТАРТ</button>
+    </div>
+  </div>
+</div>
 <div aria-live="polite" class="toast pointer-events-none fixed bottom-5 left-1/2 z-50 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft" id="toast" role="status"></div>
-<script src="/static/app.js?v=20260811-1"></script>
+<script src="/static/app.js?v=20260813-1"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
 
 import gspread
-from gspread.utils import ValueInputOption, ValueRenderOption
+from gspread.exceptions import APIError
+from gspread.utils import ValidationConditionType, ValueInputOption, ValueRenderOption
 
 SPREADSHEET_TITLE = 'Fyvessa Admin'
 CREDENTIALS_PATH = Path('assets/credentials.json')
@@ -20,13 +21,14 @@ class SheetSpec:
     columns: tuple[str, ...]
     aliases: dict[str, str]
     display_names: dict[str, str] | None = None
+    checkbox_fields: tuple[str, ...] = ()
 
 
 PRODUCTS = SheetSpec(
     columns=(
         'image_url', 'sku', 'name', 'description', 'characteristics',
         'retail_price', 'wholesale_price', 'discount_price',
-        'is_active', 'is_popular', 'is_recommended', 'owner',
+        'is_active', 'is_popular', 'is_new', 'owner',
     ),
     aliases={
         'артикул': 'sku',
@@ -42,9 +44,12 @@ PRODUCTS = SheetSpec(
         'фото товара': 'image_url',
         'активен': 'is_active',
         'популярный': 'is_popular',
-        'рекомендуемый': 'is_recommended',
+        'новинка': 'is_new',
+        'рекомендуемый': 'is_new',
+        'is recommended': 'is_new',
         'владелец': 'owner',
     },
+    checkbox_fields=('is_active', 'is_popular', 'is_new'),
 )
 
 OWNERS = SheetSpec(
@@ -255,6 +260,37 @@ def write_updates(worksheet: gspread.Worksheet, updates: list[CellUpdate]) -> No
     )
 
 
+def ensure_checkboxes(
+    spreadsheet: gspread.Spreadsheet,
+    worksheets: list[tuple[gspread.Worksheet, dict[str, int]]],
+    spec: SheetSpec,
+) -> None:
+    for worksheet, column_map in worksheets:
+        requests = []
+        for field in spec.checkbox_fields:
+            column_index = column_map[field] - 1
+            requests.append({'setDataValidation': {
+                'range': {
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 1,
+                    'endRowIndex': worksheet.row_count,
+                    'startColumnIndex': column_index,
+                    'endColumnIndex': column_index + 1,
+                },
+                'rule': {
+                    'condition': {'type': ValidationConditionType.boolean.value},
+                    'strict': True,
+                },
+            }})
+        try:
+            spreadsheet.batch_update({'requests': requests})
+        except APIError as exc:
+            # Google Sheets tables already render typed boolean columns as
+            # checkboxes and reject an additional validation rule.
+            if 'not allowed on cells in typed columns' not in str(exc):
+                raise
+
+
 def as_decimal(value: Any) -> Optional[Decimal]:
     normalized = str(value or '').strip().casefold()
     for token in ('\u00a0', ' ', '₽', 'рублей', 'рубля', 'руб.', 'руб', '%'):
@@ -297,7 +333,7 @@ def sheet_value(field: str, value: Any) -> Any:
         if value is None:
             return ''
         return int(value) if value == value.to_integral_value() else float(value)
-    if field in {'is_active', 'is_popular', 'is_recommended'}:
+    if field in {'is_active', 'is_popular', 'is_new'}:
         return bool(value)
     return '' if value is None else str(value)
 

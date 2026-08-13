@@ -51,7 +51,7 @@ class Product(SQLModel, table=True):
     image_url: Optional[str] = None
     is_active: bool = Field(default=True, index=True)
     is_popular: bool = Field(default=False, index=True)
-    is_recommended: bool = Field(default=False, index=True)
+    is_new: bool = Field(default=False, index=True)
     owner: str = 'Булат'
     owner_share_percent: Decimal = Field(default=Decimal('70'), decimal_places=2)
     views_count: int = 0
@@ -342,6 +342,12 @@ class Order(SQLModel, table=True):
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     status: str = Field(default='draft', index=True)
     payment_status: str = Field(default='not_paid', index=True)
+    shipping_status: str = Field(default='created', index=True)
+    recipient_first_name: str = ''
+    recipient_last_name: str = ''
+    recipient_phone_number: str = ''
+    delivery_method: str = ''
+    pickup_point_address: str = Field(default='', sa_type=Text)
     promo_code_id: Optional[int] = Field(default=None, foreign_key='promocode.id')
     discount_mode: str = 'none'
     product_discount_total: Decimal = Field(default=Decimal('0'), decimal_places=2)
@@ -359,6 +365,8 @@ class Order(SQLModel, table=True):
     payment_reported_at: Optional[datetime] = None
     paid_at: Optional[datetime] = Field(default=None, index=True)
     paid_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
+    shipped_at: Optional[datetime] = Field(default=None, index=True)
+    delivered_at: Optional[datetime] = Field(default=None, index=True)
 
     @classmethod
     async def get_by_id(cls, order_id: int, user_id: Optional[int] = None) -> Optional[Self]:

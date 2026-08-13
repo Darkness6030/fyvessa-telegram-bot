@@ -109,7 +109,7 @@ def _electronics_rows(
             'discount_price': None,
             'is_active': safe,
             'is_popular': False,
-            'is_recommended': False,
+            'is_new': False,
             'owner': 'Булат',
         }
         result.append(_product_values(data))
@@ -146,7 +146,7 @@ def _perfume_rows(
             'discount_price': None,
             'is_active': safe,
             'is_popular': False,
-            'is_recommended': False,
+            'is_new': False,
             'owner': 'Диана',
         }
         result.append(_product_values(data))

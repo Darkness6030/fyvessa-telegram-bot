@@ -3,7 +3,18 @@
     <div><p class="text-xs font-bold uppercase tracking-wider text-coral">Заказ</p>
       <h1 class="mt-1 text-3xl font-black">{{ order.number }}</h1>
       <p class="mt-2 text-sm text-black/50">{{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</p></div>
-    <span class="rounded-full bg-cream px-4 py-2 text-sm font-bold">{{ status_labels.get(order.status, order.status) }}</span></div>
+    <div class="flex flex-col items-end gap-2">
+      <span class="rounded-full bg-cream px-4 py-2 text-sm font-bold">{{ status_labels.get(order.status, order.status) }}</span>
+      <span class="rounded-full bg-coral/10 px-4 py-2 text-sm font-bold text-coral">{{ shipping_status_labels.get(order.shipping_status, order.shipping_status) }}</span>
+    </div></div>
+  <div class="mt-6 rounded-2xl bg-cream p-4 text-sm">
+    <p class="font-black">Получатель и доставка</p>
+    <p class="mt-2 text-black/65">{{ order.recipient_first_name }} {{ order.recipient_last_name }} · {{ order.recipient_phone_number }}</p>
+    <p class="mt-1 text-black/65">{{ delivery_method_labels.get(order.delivery_method, order.delivery_method or 'Не указана') }}</p>
+    <p class="mt-1 whitespace-pre-line text-black/65">{{ order.pickup_point_address or 'Адрес не указан' }}</p>
+    {% if order.shipped_at %}<p class="mt-2 text-xs text-black/45">Отправлен {{ order.shipped_at.strftime('%d.%m.%Y %H:%M') }}</p>{% endif %}
+    {% if order.delivered_at %}<p class="mt-1 text-xs text-black/45">Доставлен {{ order.delivered_at.strftime('%d.%m.%Y %H:%M') }}</p>{% endif %}
+  </div>
   <div class="mt-6 space-y-3 border-y border-black/10 py-5">
     {% for item in items %}
     <div class="flex justify-between gap-4">

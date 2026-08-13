@@ -35,6 +35,20 @@
 <form class="mt-6 rounded-[1.5rem] bg-ink p-6 text-white" id="checkout-form">
   <div class="flex items-end justify-between"><span class="text-white/55">Итого</span><strong class="text-3xl" data-cart-total>{{ "%.0f"|format(total) }} ₽</strong></div>
   <div class="mt-5 space-y-3">
+    <div class="grid gap-3 sm:grid-cols-2">
+      <label class="block text-sm"><span class="text-white/65">Имя получателя</span><input autocomplete="given-name" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" maxlength="80" minlength="2" name="recipient_first_name" required value="{{ user.first_name or '' }}"></label>
+      <label class="block text-sm"><span class="text-white/65">Фамилия получателя</span><input autocomplete="family-name" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" maxlength="80" minlength="2" name="recipient_last_name" required value="{{ user.last_name or '' }}"></label>
+    </div>
+    <label class="block text-sm"><span class="text-white/65">Телефон</span><input autocomplete="tel" class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" inputmode="tel" name="recipient_phone_number" placeholder="+7 999 000-00-00" required type="tel" value="{{ user.phone_number or '' }}"></label>
+    <label class="block text-sm"><span class="text-white/65">Способ доставки</span>
+      <select class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" name="delivery_method" required>
+        <option value="">Выберите службу</option>
+        <option value="cdek">СДЭК</option>
+        <option value="russian_post">Почта России</option>
+        <option value="ozon">Ozon</option>
+      </select>
+    </label>
+    <label class="block text-sm"><span class="text-white/65">Адрес пункта выдачи</span><textarea class="mt-1 min-h-24 w-full resize-y rounded-xl bg-white px-4 py-3 text-ink" maxlength="500" minlength="5" name="pickup_point_address" placeholder="Город, улица, номер пункта выдачи" required></textarea></label>
     <label class="block text-sm"><span class="text-white/65">Скидка</span>
       <select class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" name="discount_mode">
         <option value="none">Без дополнительной скидки</option>
@@ -47,7 +61,6 @@
     <label class="block text-sm"><span class="text-white/65">Промокод, если выбран</span><input autocomplete="off" class="mt-1 w-full rounded-xl bg-white px-4 py-3 uppercase text-ink" name="promo_code" placeholder="Например, OUTSIDE"></label>
     {% if user.coin_balance %}<label class="block text-sm"><span class="text-white/65">Списать коины (доступно {{ user.coin_balance }})</span><input class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" max="{{ user.coin_balance }}" min="0" name="coins_requested" step="0.01" type="number" value="0"></label>{% endif %}
   </div>
-  {% if not user.is_registered %}<p class="mt-4 rounded-xl bg-coral/20 px-4 py-3 text-sm">Перед заказом потребуется <a class="font-black underline" href="/profile">заполнить профиль</a>.</p>{% endif %}
   {% if missing_confirmation_count %}<p class="mt-4 rounded-xl bg-white/10 px-4 py-3 text-sm">Для оформления подтвердите нужное количество каждого товара. Запрос сразу появится в админском чате.</p>{% endif %}
   <button class="mt-5 w-full rounded-xl bg-white py-4 font-black text-ink disabled:cursor-not-allowed disabled:opacity-40" type="submit" {% if missing_confirmation_count %}disabled{% endif %}>{{ 'Ждём подтверждения наличия' if missing_confirmation_count else 'Оформить заказ' }}</button>
 </form>

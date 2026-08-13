@@ -25,7 +25,7 @@ from src.models import (
     Promocode,
     User,
 )
-from src.orders import cancel_order, confirm_payment, ORDER_STATUS_LABELS
+from src.orders import cancel_order, confirm_payment, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
 from src.settings import SettingsValidationError, sync_settings
 
 
@@ -99,6 +99,12 @@ ORDER_COMMAND_ACTIONS = {
     'оплачен': 'paid',
     'cancel': 'cancel',
     'отмена': 'cancel',
+    'assembling': 'assembling',
+    'собирается': 'assembling',
+    'shipped': 'shipped',
+    'отправлен': 'shipped',
+    'delivered': 'delivered',
+    'доставлен': 'delivered',
 }
 
 
@@ -152,7 +158,11 @@ async def notify_payment_review(order: Order, user: User) -> bool:
         f'<b>Покупатель сообщил об оплате</b>\n\n'
         f'Заказ: <b>{html.escape(order.number)}</b>\n'
         f'Сумма: <b>{order.paid_total} ₽</b>\n'
-        f'Покупатель: {user.id} ({username})',
+        f'Покупатель: {user.id} ({username})\n'
+        f'Получатель: {html.escape(order.recipient_first_name)} '
+        f'{html.escape(order.recipient_last_name)}, {html.escape(order.recipient_phone_number)}\n'
+        f'{DELIVERY_METHOD_LABELS.get(order.delivery_method, order.delivery_method)}: '
+        f'{html.escape(order.pickup_point_address)}',
         reply_markup=inline_keyboard([
             (
                 '✅ Подтвердить оплату',
@@ -402,8 +412,13 @@ def _order_text(order: Order, user: Optional[User] = None) -> str:
         f'<b>{html.escape(order.number)}</b> · {order.paid_total} ₽\n'
         f'ID заказа: <code>{order.id}</code>\n'
         f'{ORDER_STATUS_LABELS.get(order.status, order.status)} · '
+        f'доставка: {SHIPPING_STATUS_LABELS.get(order.shipping_status, order.shipping_status)} · '
         f'{order.created_at:%d.%m.%Y %H:%M}\n'
-        f'Пользователь: <code>{order.user_id}</code>{username}'
+        f'Пользователь: <code>{order.user_id}</code>{username}\n'
+        f'Получатель: {html.escape(order.recipient_first_name)} '
+        f'{html.escape(order.recipient_last_name)}, {html.escape(order.recipient_phone_number)}\n'
+        f'{DELIVERY_METHOD_LABELS.get(order.delivery_method, order.delivery_method)}: '
+        f'{html.escape(order.pickup_point_address)}'
     )
 
 
@@ -423,6 +438,18 @@ def _order_keyboard(order: Order, user_id: int = 0, page: int = 0, total: int = 
             OrderActionCallback(
                 order_id=order.id, action='cancel',
             ),
+        ))
+
+    next_shipping_status = {
+        'created': ('📦 Начать сборку', 'assembling'),
+        'assembling': ('🚚 Отправлен', 'shipped'),
+        'shipped': ('✅ Доставлен', 'delivered'),
+    }.get(order.shipping_status)
+    if order.payment_status == 'paid' and next_shipping_status:
+        button_text, status = next_shipping_status
+        buttons.append((
+            button_text,
+            OrderActionCallback(order_id=order.id, action=status),
         ))
 
     navigation = (
@@ -838,8 +865,15 @@ async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
     elif action == 'cancel':
         has_changed = await cancel_order(order, admin_id)
         message_text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
+    elif action in {'assembling', 'shipped', 'delivered'}:
+        has_changed = await update_shipping_status(order, action)
+        label = SHIPPING_STATUS_LABELS[action]
+        message_text = (
+            f'📦 Статус доставки заказа <b>{html.escape(order.number)}</b>: '
+            f'<b>{label}</b>.'
+        )
     else:
-        raise ValueError('Действие: оплачен или отмена')
+        raise ValueError('Действие: оплачен, отмена, собирается, отправлен или доставлен')
 
     if has_changed:
         user = await User.get_by_id(order.user_id)
@@ -889,7 +923,7 @@ async def order_command(message: Message, command: CommandObject):
     if len(parts) != 2 or not parts[0].isdigit():
         return await _answer_with_navigation(
             message,
-            'Формат: <code>/order ID оплачен</code> или <code>/order ID отмена</code>',
+            'Формат: <code>/order ID оплачен|отмена|собирается|отправлен|доставлен</code>',
             'orders',
         )
 

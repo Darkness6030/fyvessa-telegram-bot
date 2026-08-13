@@ -4,6 +4,11 @@
     --ease-out: cubic-bezier(.22, 1, .36, 1);
 }
 
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --tg-bg: #121210;
+}
+
 html { scroll-behavior: smooth; }
 body { background: var(--tg-bg); overflow-x: hidden; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -14,6 +19,9 @@ body { background: var(--tg-bg); overflow-x: hidden; }
     background-size: 28px 28px;
 }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
+.welcome-orb { filter: blur(2px); opacity: .7; }
+.welcome-screen.is-visible { display: flex; }
+.product-slider { scroll-behavior: smooth; }
 .product-placeholder {
     background:
         radial-gradient(circle at 20% 12%, rgba(255,255,255,.8), transparent 30%),
@@ -41,12 +49,12 @@ body { background: var(--tg-bg); overflow-x: hidden; }
 }
 .product-placeholder-icon svg { height: 58%; width: 58%; }
 .product-placeholder-label { color: rgba(65,89,71,.62); }
-button, a, input, select { -webkit-tap-highlight-color: transparent; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { transition: transform .2s var(--ease-out), opacity .2s ease, background-color .2s ease, color .2s ease, border-color .2s ease; }
 button:active, a:active { transform: scale(.975); }
 button:disabled { cursor: wait; }
-input, select { transition: box-shadow .2s ease, background-color .2s ease, border-color .2s ease; }
-input:focus, select:focus { box-shadow: 0 0 0 3px rgba(237,105,75,.16); }
+input, select, textarea { transition: box-shadow .2s ease, background-color .2s ease, border-color .2s ease; }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(237,105,75,.16); outline: none; }
 .nav-link:hover, .nav-link[aria-current="page"] { background: white; }
 .nav-link[aria-current="page"] { color: #ed694b; }
 
@@ -110,6 +118,38 @@ body.is-navigating main { opacity: .55; transform: translateY(3px); pointer-even
 .profile-save-status { transition: color .2s ease, opacity .2s ease; }
 .profile-save-status.is-dirty { color: #ed694b; }
 .profile-save-status.is-saved { color: #557258; }
+
+html[data-theme="dark"] body,
+html[data-theme="dark"] .bg-cream { background-color: #121210 !important; color: #f5f1e8; }
+html[data-theme="dark"] header { background-color: rgba(18,18,16,.92) !important; border-color: rgba(255,255,255,.08) !important; }
+html[data-theme="dark"] .bg-white { background-color: #242421 !important; }
+html[data-theme="dark"] .bg-white\/90 { background-color: rgba(36,36,33,.92) !important; }
+html[data-theme="dark"] .bg-white\/70,
+html[data-theme="dark"] .bg-white\/50 { background-color: rgba(36,36,33,.72) !important; }
+html[data-theme="dark"] .text-ink { color: #f5f1e8 !important; }
+html[data-theme="dark"] .text-black\/65 { color: rgba(245,241,232,.68) !important; }
+html[data-theme="dark"] .text-black\/55,
+html[data-theme="dark"] .text-black\/50 { color: rgba(245,241,232,.58) !important; }
+html[data-theme="dark"] .text-black\/45,
+html[data-theme="dark"] .text-black\/40,
+html[data-theme="dark"] .text-black\/35,
+html[data-theme="dark"] .text-black\/30,
+html[data-theme="dark"] .text-black\/25 { color: rgba(245,241,232,.45) !important; }
+html[data-theme="dark"] [class*="border-black"] { border-color: rgba(255,255,255,.12) !important; }
+html[data-theme="dark"] .nav-link:hover,
+html[data-theme="dark"] .nav-link[aria-current="page"] { background: #292925; }
+html[data-theme="dark"] .profile-link:hover,
+html[data-theme="dark"] .profile-field input { background: #181816; }
+html[data-theme="dark"] .profile-field input:focus { background: #242421; }
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea { color: #f5f1e8; }
+html[data-theme="dark"] input::placeholder { color: rgba(245,241,232,.35); }
+html[data-theme="dark"] .product-placeholder {
+    background: radial-gradient(circle at 20% 12%, rgba(255,255,255,.12), transparent 30%),
+                radial-gradient(circle at 85% 88%, rgba(237,105,75,.22), transparent 34%),
+                linear-gradient(145deg, #292925, #1b1b19);
+}
 
 [data-product-card-id].is-removing, [data-cart-item].is-removing {
     opacity: 0;

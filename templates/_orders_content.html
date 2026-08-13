@@ -4,7 +4,8 @@
   <a class="flex items-center justify-between rounded-[1.5rem] bg-white p-5 shadow-soft" href="/orders/{{ order.id }}">
     <div><p class="text-xs font-bold uppercase tracking-wider text-black/40">{{ order.created_at.strftime('%d.%m.%Y') }}</p>
       <h2 class="mt-1 font-black">{{ order.number }}</h2>
-      <p class="mt-1 text-sm text-black/55">{{ status_labels.get(order.status, order.status) }}</p></div>
+      <p class="mt-1 text-sm text-black/55">{{ status_labels.get(order.status, order.status) }}</p>
+      <p class="mt-1 text-sm font-bold text-coral">Доставка: {{ shipping_status_labels.get(order.shipping_status, order.shipping_status) }}</p></div>
     <div class="text-right"><strong class="text-xl">{{ "%.0f"|format(order.paid_total) }} ₽</strong>
       <p class="mt-1 text-black/30">→</p></div>
   </a>

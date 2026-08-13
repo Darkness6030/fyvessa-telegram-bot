@@ -43,7 +43,7 @@ class CatalogRow(BaseModel):
     image_url: Optional[str] = None
     is_active: bool = True
     is_popular: bool = False
-    is_recommended: bool = False
+    is_new: bool = False
     owner: str = 'Булат'
     owner_share_percent: Decimal = PydanticField(default=Decimal('70'), ge=0, le=100)
 

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Optional
@@ -27,7 +27,7 @@ from src.models import (
     ProductView,
     User,
 )
-from src.orders import (confirmed_cart_availability, create_order_from_cart, ORDER_STATUS_LABELS, report_payment)
+from src.orders import (confirmed_cart_availability, create_order_from_cart, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, report_payment, SHIPPING_STATUS_LABELS)
 from src.settings import get_settings
 
 plugin = simple_plugin()
@@ -35,6 +35,21 @@ router = APIRouter()
 
 templates = Jinja2Templates(directory='templates')
 RequestUser = Annotated[User, Depends(get_init_data_user)]
+
+
+def _validate_name(value: str) -> str:
+    value = value.strip()
+    if len(value) < 2 or len(value) > 80:
+        raise ValueError('Имя и фамилия должны содержать от 2 до 80 символов')
+    return value
+
+
+def _validate_phone(value: str) -> str:
+    value = value.strip()
+    digits = ''.join(character for character in value if character.isdigit())
+    if not 10 <= len(digits) <= 15:
+        raise ValueError('Укажите корректный номер телефона')
+    return value
 
 
 class HealthResponse(BaseModel):
@@ -50,10 +65,7 @@ class UpdateProfileRequest(BaseModel):
     @field_validator('first_name', 'last_name')
     @classmethod
     def validate_name(cls, value: str) -> str:
-        value = value.strip()
-        if len(value) < 2 or len(value) > 80:
-            raise ValueError('Имя и фамилия должны содержать от 2 до 80 символов')
-        return value
+        return _validate_name(value)
 
     @field_validator('birth_date')
     @classmethod
@@ -65,11 +77,7 @@ class UpdateProfileRequest(BaseModel):
     @field_validator('phone_number')
     @classmethod
     def validate_phone(cls, value: str) -> str:
-        value = value.strip()
-        digits = ''.join(character for character in value if character.isdigit())
-        if not 10 <= len(digits) <= 15:
-            raise ValueError('Укажите корректный номер телефона')
-        return value
+        return _validate_phone(value)
 
 
 class OkResponse(BaseModel):
@@ -105,6 +113,36 @@ class CheckoutRequest(BaseModel):
     discount_mode: str = 'none'
     promo_code: str = ''
     coins_requested: Decimal = Field(default=Decimal('0'), ge=0)
+    recipient_first_name: str
+    recipient_last_name: str
+    recipient_phone_number: str
+    delivery_method: str
+    pickup_point_address: str
+
+    @field_validator('recipient_first_name', 'recipient_last_name')
+    @classmethod
+    def validate_recipient_name(cls, value: str) -> str:
+        return _validate_name(value)
+
+    @field_validator('recipient_phone_number')
+    @classmethod
+    def validate_recipient_phone(cls, value: str) -> str:
+        return _validate_phone(value)
+
+    @field_validator('delivery_method')
+    @classmethod
+    def validate_delivery_method(cls, value: str) -> str:
+        if value not in {'cdek', 'russian_post', 'ozon'}:
+            raise ValueError('Выберите способ доставки')
+        return value
+
+    @field_validator('pickup_point_address')
+    @classmethod
+    def validate_pickup_point_address(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 5 or len(value) > 500:
+            raise ValueError('Укажите адрес пункта выдачи')
+        return value
 
 
 class CheckoutResponse(BaseModel):
@@ -145,13 +183,6 @@ def _optional_nonnegative_int(value: str, field_name: str) -> Optional[int]:
     return parsed
 
 
-def _is_new(product: Product) -> bool:
-    created_at = product.created_at
-    if not created_at.tzinfo:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    return created_at >= datetime.now(timezone.utc) - timedelta(days=7)
-
-
 async def _catalog_context(
     request: Request,
     q: str = '',
@@ -163,12 +194,27 @@ async def _catalog_context(
         q, category_id, min_price, max_price,
     )
     categories = await Category.get_active()
+    featured_categories = []
+    for category in categories:
+        if category_id is not None and category.id != category_id:
+            continue
+        category_products = [
+            product for product in products if product.category_id == category.id
+        ]
+        popular = [product for product in category_products if product.is_popular]
+        new_products = [product for product in category_products if product.is_new]
+        if popular or new_products:
+            featured_categories.append({
+                'category': category,
+                'popular': popular,
+                'new_products': new_products,
+            })
     return {
         'request': request,
         'products': products,
         'categories': categories,
         'categories_by_id': {category.id: category for category in categories},
-        'is_new': _is_new,
+        'featured_categories': featured_categories,
         'filters': {
             'q': q,
             'category_id': category_id,
@@ -191,15 +237,10 @@ async def home(request: Request) -> HTMLResponse:
         **catalog_context,
         'popular': [
             product for product in catalog_context['products'] if product.is_popular
-        ][:6],
-        'recommended': [
-            product
-            for product in catalog_context['products']
-            if product.is_recommended
-        ][:6],
+        ][:12],
         'new_products': [
-            product for product in catalog_context['products'] if _is_new(product)
-        ][:6],
+            product for product in catalog_context['products'] if product.is_new
+        ][:12],
     }
     return templates.TemplateResponse(request=request, name='home.html', context=context)
 
@@ -255,7 +296,7 @@ async def product_detail(request: Request, sku: str) -> HTMLResponse:
             'request': request,
             'product': product,
             'category': category,
-            'is_new': _is_new(product),
+            'is_new': product.is_new,
         },
     )
 
@@ -338,7 +379,6 @@ async def favorites_fragment(request: Request, user: RequestUser) -> HTMLRespons
             'request': request,
             'products': products,
             'categories_by_id': {category.id: category for category in categories},
-            'is_new': _is_new,
         },
     )
 
@@ -368,7 +408,6 @@ async def recent_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'request': request,
             'products': products,
             'categories_by_id': {category.id: category for category in categories},
-            'is_new': _is_new,
         },
     )
 
@@ -453,6 +492,7 @@ async def orders_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'request': request,
             'orders': orders,
             'status_labels': ORDER_STATUS_LABELS,
+            'shipping_status_labels': SHIPPING_STATUS_LABELS,
         },
     )
 
@@ -484,6 +524,8 @@ async def order_fragment(request: Request, order_id: int, user: RequestUser) -> 
             'order': order,
             'items': cart_items,
             'status_labels': ORDER_STATUS_LABELS,
+            'shipping_status_labels': SHIPPING_STATUS_LABELS,
+            'delivery_method_labels': DELIVERY_METHOD_LABELS,
             'payment_details': get_settings().payment_details,
         },
     )
@@ -635,6 +677,11 @@ async def checkout(request: CheckoutRequest, user: RequestUser) -> CheckoutRespo
         discount_mode=request.discount_mode,
         promo_code=request.promo_code,
         coins_requested=request.coins_requested,
+        recipient_first_name=request.recipient_first_name,
+        recipient_last_name=request.recipient_last_name,
+        recipient_phone_number=request.recipient_phone_number,
+        delivery_method=request.delivery_method,
+        pickup_point_address=request.pickup_point_address,
     )
 
     return CheckoutResponse(

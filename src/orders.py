@@ -27,6 +27,20 @@ ORDER_STATUS_LABELS = {
     'cancelled': 'Отменён',
 }
 
+SHIPPING_STATUS_LABELS = {
+    'created': 'Оформлен',
+    'assembling': 'Собирается',
+    'shipped': 'Отправлен',
+    'delivered': 'Доставлен',
+    'cancelled': 'Отменён',
+}
+
+DELIVERY_METHOD_LABELS = {
+    'cdek': 'СДЭК',
+    'russian_post': 'Почта России',
+    'ozon': 'Ozon',
+}
+
 
 async def confirmed_cart_availability(user: User, cart_items: Optional[list[CartItem]]) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
     cart_items = cart_items or await CartItem.get_for_user(user.id)
@@ -64,12 +78,23 @@ async def create_order_from_cart(
     discount_mode: str,
     promo_code: str,
     coins_requested: Decimal,
+    recipient_first_name: str,
+    recipient_last_name: str,
+    recipient_phone_number: str,
+    delivery_method: str,
+    pickup_point_address: str,
 ) -> Order:
-    if not user.is_registered:
-        raise HTTPException(
-            status_code=409,
-            detail='Заполните имя, фамилию, дату рождения и телефон в профиле',
-        )
+    if delivery_method not in DELIVERY_METHOD_LABELS:
+        raise HTTPException(status_code=422, detail='Выберите способ доставки')
+
+    recipient_first_name = recipient_first_name.strip()
+    recipient_last_name = recipient_last_name.strip()
+    recipient_phone_number = recipient_phone_number.strip()
+    pickup_point_address = pickup_point_address.strip()
+    if not all((recipient_first_name, recipient_last_name, recipient_phone_number)):
+        raise HTTPException(status_code=422, detail='Заполните данные получателя')
+    if len(pickup_point_address) < 5:
+        raise HTTPException(status_code=422, detail='Укажите адрес пункта выдачи')
 
     cart_items = await CartItem.get_for_user(user.id)
     if not cart_items:
@@ -139,6 +164,12 @@ async def create_order_from_cart(
         user_id=user.id,
         status='awaiting_payment',
         payment_status='not_paid',
+        shipping_status='created',
+        recipient_first_name=recipient_first_name,
+        recipient_last_name=recipient_last_name,
+        recipient_phone_number=recipient_phone_number,
+        delivery_method=delivery_method,
+        pickup_point_address=pickup_point_address,
         promo_code_id=promocode.id if promocode else None,
         discount_mode=discount_mode,
         product_discount_total=pricing.product_discount,
@@ -152,6 +183,15 @@ async def create_order_from_cart(
 
     session = session_context.get()
     await session.flush()
+
+    if not user.first_name:
+        user.first_name = recipient_first_name
+    if not user.last_name:
+        user.last_name = recipient_last_name
+    if not user.phone_number:
+        user.phone_number = recipient_phone_number
+    user.updated_at = current_date
+    user.add()
 
     category_names = {
         category.id: category.name
@@ -253,6 +293,7 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
 
     order.status = 'paid'
     order.payment_status = 'paid'
+    order.shipping_status = 'assembling'
     order.paid_at = datetime.now()
     order.paid_by_admin_id = admin_id
     order.add()
@@ -289,6 +330,30 @@ async def cancel_order(order: Order, admin_id: int) -> bool:
 
     order.status = 'cancelled'
     order.payment_status = 'cancelled'
+    order.shipping_status = 'cancelled'
     order.paid_by_admin_id = admin_id
+    order.add()
+    return True
+
+
+async def update_shipping_status(order: Order, status: str) -> bool:
+    if status not in {'assembling', 'shipped', 'delivered'}:
+        raise ValueError('Неизвестный статус отправки')
+    if order.payment_status != 'paid':
+        raise ValueError('Сначала подтвердите оплату заказа')
+    if order.shipping_status == status:
+        return False
+
+    current_date = datetime.now()
+    order.shipping_status = status
+    if status == 'shipped' and not order.shipped_at:
+        order.shipped_at = current_date
+    if status == 'delivered':
+        order.shipped_at = order.shipped_at or current_date
+        order.delivered_at = current_date
+        order.status = 'completed'
+    elif order.status == 'completed':
+        order.status = 'paid'
+        order.delivered_at = None
     order.add()
     return True
