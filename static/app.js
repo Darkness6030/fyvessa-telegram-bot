@@ -14,7 +14,6 @@ const INIT_DATA_STORAGE_KEY = 'fyvessa.telegramInitData';
 const PROFILE_DRAFT_KEY = 'fyvessa.profileDraft';
 const CHECKOUT_DRAFT_KEY = 'fyvessa.checkoutDraft';
 const THEME_KEY = 'fyvessa.theme';
-const WELCOME_KEY = 'fyvessa.welcomeSeen';
 const fragmentRequests = new WeakMap();
 const cartUpdates = new Map();
 let navigationSequence = 0;
@@ -39,23 +38,6 @@ function toggleTheme() {
     const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
     applyTheme(theme);
-}
-
-function initWelcome() {
-    const screen = document.querySelector('[data-welcome-screen]');
-    if (!screen) return;
-    let seen = false;
-    try { seen = localStorage.getItem(WELCOME_KEY) === 'true'; } catch (_) {}
-    if (seen) return;
-    screen.classList.add('is-visible');
-    document.body.style.overflow = 'hidden';
-}
-
-function startWelcome() {
-    try { localStorage.setItem(WELCOME_KEY, 'true'); } catch (_) {}
-    document.querySelector('[data-welcome-screen]')?.classList.remove('is-visible');
-    document.body.style.overflow = '';
-    navigateTo('/catalog');
 }
 
 function initAutoSliders(root = document) {
@@ -689,10 +671,6 @@ document.addEventListener('click', (event) => {
         toggleTheme();
         return;
     }
-    if (event.target.closest?.('[data-welcome-start]')) {
-        startWelcome();
-        return;
-    }
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target.closest?.('a[href]');
     if (!link || link.dataset.noSoftNav !== undefined || link.target || link.download) return;
@@ -763,5 +741,4 @@ history.replaceState({
     navigationDepth: Number(history.state?.navigationDepth || 0)
 }, '');
 applyTheme(document.documentElement.dataset.theme);
-initWelcome();
 hydratePage();

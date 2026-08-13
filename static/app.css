@@ -19,8 +19,6 @@ body { background: var(--tg-bg); overflow-x: hidden; }
     background-size: 28px 28px;
 }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
-.welcome-orb { filter: blur(2px); opacity: .7; }
-.welcome-screen.is-visible { display: flex; }
 .product-slider { scroll-behavior: smooth; }
 .product-placeholder {
     background:
