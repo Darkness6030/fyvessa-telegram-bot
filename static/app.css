@@ -20,6 +20,7 @@ body { background: var(--tg-bg); overflow-x: hidden; }
 }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
 .product-slider { scroll-behavior: smooth; }
+.home-product-feed { scroll-behavior: smooth; }
 .product-placeholder {
     background:
         radial-gradient(circle at 20% 12%, rgba(255,255,255,.8), transparent 30%),

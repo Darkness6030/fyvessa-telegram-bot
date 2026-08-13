@@ -34,9 +34,9 @@
     <h2 class="text-2xl font-black tracking-tight sm:text-3xl">{{ section_title }}</h2>
     <a class="text-sm font-bold text-black/50" href="/catalog">Все товары →</a>
   </div>
-  <div class="product-slider no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3" data-auto-slider>
+  <div class="home-product-feed no-scrollbar grid max-h-[42rem] grid-cols-2 gap-x-3 gap-y-8 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" data-auto-feed>
     {% for product in section_products %}
-    <div class="w-[46%] shrink-0 snap-start sm:w-[31%] lg:w-[16%]">{{ product_card(product, categories_by_id.get(product.category_id)) }}</div>
+    <div>{{ product_card(product, categories_by_id.get(product.category_id)) }}</div>
     {% endfor %}
   </div>
 </section>

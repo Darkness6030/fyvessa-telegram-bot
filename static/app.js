@@ -64,6 +64,36 @@ function initAutoSliders(root = document) {
         slider.addEventListener('pointercancel', resume);
         resume();
     });
+
+    root.querySelectorAll('[data-auto-feed]').forEach((feed) => {
+        if (feed.__fyvessaFeedTimer) return;
+        const advance = () => {
+            if (!feed.isConnected) {
+                clearInterval(feed.__fyvessaFeedTimer);
+                return;
+            }
+            if (feed.scrollHeight <= feed.clientHeight) return;
+            const firstCard = feed.firstElementChild;
+            const gap = parseFloat(getComputedStyle(feed).rowGap) || 32;
+            const step = (firstCard?.getBoundingClientRect().height || 260) + gap;
+            const atEnd = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - step / 2;
+            if (atEnd) {
+                feed.style.scrollBehavior = 'auto';
+                feed.scrollTop = 0;
+                requestAnimationFrame(() => { feed.style.scrollBehavior = ''; });
+            } else {
+                feed.scrollTo({top: feed.scrollTop + step, behavior: 'smooth'});
+            }
+        };
+        const resume = () => {
+            clearInterval(feed.__fyvessaFeedTimer);
+            feed.__fyvessaFeedTimer = setInterval(advance, 3800);
+        };
+        feed.addEventListener('pointerdown', () => clearInterval(feed.__fyvessaFeedTimer));
+        feed.addEventListener('pointerup', resume);
+        feed.addEventListener('pointercancel', resume);
+        resume();
+    });
 }
 
 function initDataFromLocation() {
