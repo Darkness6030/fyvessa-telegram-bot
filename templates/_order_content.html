@@ -6,7 +6,8 @@
     <div class="flex flex-col items-end gap-2">
       <span class="rounded-full bg-cream px-4 py-2 text-sm font-bold">{{ status_labels.get(order.status, order.status) }}</span>
       <span class="rounded-full bg-coral/10 px-4 py-2 text-sm font-bold text-coral">{{ shipping_status_labels.get(order.shipping_status, order.shipping_status) }}</span>
-    </div></div>
+    </div>
+  </div>
   <div class="mt-6 rounded-2xl bg-cream p-4 text-sm">
     <p class="font-black">Получатель и доставка</p>
     <p class="mt-2 text-black/65">{{ order.recipient_first_name }} {{ order.recipient_last_name }} · {{ order.recipient_phone_number }}</p>

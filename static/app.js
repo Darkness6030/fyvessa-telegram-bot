@@ -242,6 +242,17 @@ function restoreFragmentState(container, snapshot) {
     });
 }
 
+function syncPromoCodeField(form) {
+    if (!form) return;
+    const discountMode = form.elements.namedItem('discount_mode');
+    const promoCode = form.elements.namedItem('promo_code');
+    if (!discountMode || !promoCode) return;
+
+    const promoSelected = discountMode.value === 'promo';
+    promoCode.disabled = !promoSelected;
+    promoCode.required = promoSelected;
+}
+
 function replaceFragment(container, html) {
     if (container.__fyvessaFragmentHTML === html) return false;
 
@@ -253,6 +264,7 @@ function replaceFragment(container, html) {
     container.__fyvessaFragmentHTML = html;
     container.dataset.fragmentReady = 'true';
     restoreFragmentState(container, snapshot);
+    syncPromoCodeField(container.querySelector('#checkout-form'));
     container.animate?.(
         [{opacity: .5, transform: 'translateY(3px)'}, {opacity: 1, transform: 'none'}],
         {duration: 220, easing: 'cubic-bezier(.22,1,.36,1)'}
@@ -644,7 +656,9 @@ async function hydratePage(root = document) {
     await loadProtectedFragments(root);
     const profileForm = root.querySelector('#profile-form');
     if (restoreFormDraft(profileForm, PROFILE_DRAFT_KEY)) markProfileDirty(profileForm);
-    restoreFormDraft(root.querySelector('#checkout-form'), CHECKOUT_DRAFT_KEY);
+    const checkoutForm = root.querySelector('#checkout-form');
+    restoreFormDraft(checkoutForm, CHECKOUT_DRAFT_KEY);
+    syncPromoCodeField(checkoutForm);
     initAutoSliders(root);
     await refreshShopState();
     const product = root.querySelector('[data-record-product-view]');
@@ -718,7 +732,10 @@ function rememberFormState(event) {
         saveFormDraft(form, PROFILE_DRAFT_KEY);
     }
     const checkoutForm = event.target.closest('#checkout-form');
-    if (checkoutForm) saveFormDraft(checkoutForm, CHECKOUT_DRAFT_KEY);
+    if (checkoutForm) {
+        syncPromoCodeField(checkoutForm);
+        saveFormDraft(checkoutForm, CHECKOUT_DRAFT_KEY);
+    }
 }
 
 document.addEventListener('input', rememberFormState);

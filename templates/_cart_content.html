@@ -58,7 +58,7 @@
         <option value="promo">Использовать промокод</option>
       </select>
     </label>
-    <label class="block text-sm"><span class="text-white/65">Промокод, если выбран</span><input autocomplete="off" class="mt-1 w-full rounded-xl bg-white px-4 py-3 uppercase text-ink" name="promo_code" placeholder="Например, OUTSIDE"></label>
+    <label class="block text-sm"><span class="text-white/65">Промокод, если выбран</span><input autocomplete="off" class="mt-1 w-full rounded-xl bg-white px-4 py-3 uppercase text-ink disabled:cursor-not-allowed disabled:bg-white/60 disabled:text-ink/40" disabled name="promo_code" placeholder="PROMOCODE"></label>
     {% if user.coin_balance %}<label class="block text-sm"><span class="text-white/65">Списать коины (доступно {{ user.coin_balance }})</span><input class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" max="{{ user.coin_balance }}" min="0" name="coins_requested" step="0.01" type="number" value="0"></label>{% endif %}
   </div>
   {% if missing_confirmation_count %}<p class="mt-4 rounded-xl bg-white/10 px-4 py-3 text-sm">Для оформления подтвердите нужное количество каждого товара. Запрос сразу появится в админском чате.</p>{% endif %}
