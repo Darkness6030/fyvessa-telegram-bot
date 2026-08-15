@@ -605,7 +605,8 @@ def _availability_admin_keyboard(availability: AvailabilityRequest, user_id: int
 async def _promocode_text(promocode: Promocode) -> str:
     usage_count = await Order.count_for_promocode(promocode.id)
     return (
-        f'<b>{html.escape(promocode.code)}</b> · {html.escape(promocode.partner_name)}\n'
+        f'🎟 <b>Промокод:</b> <code>{html.escape(promocode.code)}</code>\n'
+        f'👤 <b>Владелец:</b> {html.escape(promocode.partner_name)}\n\n'
         f'Скидка {promocode.user_discount_percent}% · '
         f'вознаграждение {promocode.partner_reward_percent}% · '
         f'{'активен' if promocode.is_active else 'отключён'}\n'
