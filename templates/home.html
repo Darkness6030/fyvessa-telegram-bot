@@ -3,9 +3,9 @@
 {% block title %}Fyvessa — магазин в Telegram{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-6xl px-4 pt-6 sm:pt-10" data-banner-carousel>
-  <div class="banner-slider no-scrollbar flex items-start snap-x snap-mandatory overflow-x-auto rounded-[2rem]" data-banner-slider>
+  <div class="banner-slider no-scrollbar flex items-start snap-x snap-mandatory overflow-x-auto rounded-[1rem]" data-banner-slider>
     {% for banner in banners %}
-    <a aria-label="Рекламная карточка" class="banner-slide relative block w-full shrink-0 snap-start overflow-hidden rounded-[2rem]" href="{{ banner.target_url }}" data-banner-slide>
+    <a aria-label="Рекламная карточка" class="banner-slide relative block w-full shrink-0 snap-start overflow-hidden rounded-[1rem]" href="{{ banner.target_url }}" data-banner-slide>
       {% if banner.image_url %}
       <img alt="" class="block h-auto w-full" src="{{ banner.image_url }}">
       {% else %}
@@ -19,7 +19,7 @@
       {% endif %}
     </a>
     {% else %}
-    <a class="banner-slide hero-grid relative block min-h-[20rem] w-full shrink-0 snap-start overflow-hidden rounded-[2rem] bg-ink px-6 py-10 text-white sm:min-h-[27rem] sm:px-12 sm:py-16" href="/catalog" data-banner-slide>
+    <a class="banner-slide hero-grid relative block min-h-[20rem] w-full shrink-0 snap-start overflow-hidden rounded-[1.5rem] bg-ink px-6 py-10 text-white sm:min-h-[27rem] sm:px-12 sm:py-16" href="/catalog" data-banner-slide>
       <div class="relative z-10 max-w-xl"><h1 class="text-4xl font-black sm:text-7xl">Нужное.<br><span class="text-coral">Без лишнего.</span></h1></div>
       <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
     </a>
