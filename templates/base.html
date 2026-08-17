@@ -28,7 +28,7 @@
         }
     }
   </script>
-  <link href="/static/app.css?v=20260817-1" rel="stylesheet">
+  <link href="/static/app.css?v=20260817-2" rel="stylesheet">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
@@ -36,7 +36,7 @@
     <a class="text-xl font-black tracking-[-0.06em]" data-nav href="/">FYVESSA<span class="text-coral">.</span></a>
     <nav class="flex items-center gap-1 text-sm font-semibold" data-main-nav>
       <a aria-label="Каталог" class="nav-link grid h-10 place-items-center rounded-full px-3" data-nav href="/catalog"><span class="hidden sm:inline">Каталог</span><span class="text-xl sm:hidden">⌕</span></a>
-      <button aria-label="Сменить цветовую тему" class="nav-link grid h-10 w-10 place-items-center rounded-full text-lg" data-theme-toggle type="button">◐</button>
+      <button aria-label="Включить тёмную тему" aria-pressed="false" class="nav-link grid h-10 w-10 place-items-center rounded-full text-lg" data-theme-toggle type="button"><span aria-hidden="true" class="theme-icon-to-dark">◐</span><span aria-hidden="true" class="theme-icon-to-light">☀</span></button>
       <a aria-label="Избранное" class="nav-link grid h-10 w-10 place-items-center rounded-full text-xl" data-nav href="/favorites">♡</a>
       <a aria-label="Профиль" class="nav-link grid h-10 w-10 place-items-center rounded-full" data-nav href="/profile">◉</a>
       <a aria-label="Корзина" class="flex h-10 items-center gap-1 rounded-full bg-ink px-3 text-white" data-nav href="/cart" id="cart-link"><span class="hidden sm:inline">Корзина</span><span class="text-lg sm:hidden">◒</span> <span class="hidden rounded-full bg-coral px-1.5 py-0.5 text-xs" data-cart-count>0</span></a>
@@ -53,7 +53,7 @@
   </div>
 </footer>
 <div aria-live="polite" class="toast pointer-events-none fixed bottom-5 left-1/2 z-50 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft" id="toast" role="status"></div>
-<script src="/static/app.js?v=20260817-1"></script>
+<script src="/static/app.js?v=20260817-2"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

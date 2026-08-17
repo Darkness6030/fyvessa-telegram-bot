@@ -11,13 +11,12 @@ html[data-theme="dark"] {
 
 html { scroll-behavior: smooth; }
 body { background: var(--tg-bg); overflow-x: hidden; }
-html.theme-transitioning,
-html.theme-transitioning body,
-html.theme-transitioning body * {
-    transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
-    transition-duration: .3s !important;
-    transition-timing-function: var(--ease-out) !important;
-}
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after { transition: none !important; }
+.theme-icon-to-light { display: none; }
+html[data-theme="dark"] .theme-icon-to-dark { display: none; }
+html[data-theme="dark"] .theme-icon-to-light { display: inline; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 .hero-grid {

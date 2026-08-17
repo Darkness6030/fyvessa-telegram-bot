@@ -22,18 +22,12 @@ const THEME_KEY = 'fyvessa.theme';
 const fragmentRequests = new WeakMap();
 const cartUpdates = new Map();
 let navigationSequence = 0;
-let themeSequence = 0;
+let themeFrame = 0;
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
-function applyTheme(theme) {
-    const nextTheme = theme === 'dark' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = nextTheme;
-    const color = nextTheme === 'dark' ? '#121210' : '#f5f1e8';
+function updateTelegramTheme(theme) {
+    const color = theme === 'dark' ? '#121210' : '#f5f1e8';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
-    document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
-        button.textContent = nextTheme === 'dark' ? '☀' : '◐';
-        button.setAttribute('aria-label', nextTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему');
-    });
     try {
         tg?.setHeaderColor?.(color);
         tg?.setBackgroundColor?.(color);
@@ -41,19 +35,29 @@ function applyTheme(theme) {
     } catch (_) {}
 }
 
+function applyTheme(theme, {syncTelegram = true} = {}) {
+    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = nextTheme;
+    document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(nextTheme === 'dark'));
+        button.setAttribute('aria-label', nextTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему');
+    });
+    if (syncTelegram) updateTelegramTheme(nextTheme);
+}
+
 function toggleTheme() {
-    const sequence = ++themeSequence;
     const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.classList.add('theme-transitioning');
-    void document.documentElement.offsetWidth;
+
+    // Changing the theme attribute is a single style update. Telegram chrome is
+    // synchronized on the next frame so its bridge calls cannot hold up the page.
+    document.documentElement.classList.add('theme-switching');
+    applyTheme(theme, {syncTelegram: false});
     try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
-    applyTheme(theme);
-    clearTimeout(window.__fyvessaThemeTimer);
-    window.__fyvessaThemeTimer = setTimeout(() => {
-        if (sequence === themeSequence) {
-            document.documentElement.classList.remove('theme-transitioning');
-        }
-    }, 360);
+    cancelAnimationFrame(themeFrame);
+    themeFrame = requestAnimationFrame(() => {
+        document.documentElement.classList.remove('theme-switching');
+        updateTelegramTheme(theme);
+    });
 }
 
 function initBannerCarousels(root = document) {
