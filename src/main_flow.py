@@ -44,8 +44,7 @@ START_TEXT = (
     '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'
     'Здесь можно найти нужный товар, посмотреть новинки и популярное, '
     'использовать скидки и коины и оформить заказ прямо в Telegram.\n\n'
-    'Нажмите «СТАРТ», чтобы открыть каталог. Если понадобится помощь — '
-    'поддержка рядом.'
+    'Если понадобится помощь — поддержка рядом.'
 )
 
 
@@ -58,7 +57,7 @@ def create_welcome_keyboard() -> InlineKeyboardMarkup:
 def create_main_keyboard() -> InlineKeyboardMarkup:
     settings = get_settings()
     return inline_keyboard([
-        ('СТАРТ', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
+        ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
         ('⭐ Отзывы', settings.reviews_channel_url),
         ('💬 Поддержка', settings.support_url),
         ('📣 Канал', settings.channel_url),
@@ -110,7 +109,7 @@ async def catalog(message: Message):
     await message.answer(
         'Каталог откроется внутри Telegram:',
         reply_markup=inline_keyboard([
-            ('СТАРТ', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
+            ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
         ]),
     )
 

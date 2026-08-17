@@ -3,23 +3,16 @@
 {% block title %}Fyvessa — магазин в Telegram{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-6xl px-4 pt-6 sm:pt-10" data-banner-carousel>
-  <div class="banner-slider no-scrollbar flex snap-x snap-mandatory overflow-x-auto rounded-[2rem]" data-banner-slider>
+  <div class="banner-slider no-scrollbar flex items-start snap-x snap-mandatory overflow-x-auto rounded-[2rem]" data-banner-slider>
     {% for banner in banners %}
-    <a class="banner-slide relative block min-h-[20rem] w-full shrink-0 snap-start overflow-hidden rounded-[2rem] bg-ink text-white sm:min-h-[27rem]" href="{{ banner.target_url }}" data-banner-slide>
+    <a aria-label="{{ banner.title }}" class="banner-slide relative block w-full shrink-0 snap-start overflow-hidden rounded-[2rem]" href="{{ banner.target_url }}" data-banner-slide>
       {% if banner.image_url %}
-      <img alt="{{ banner.title }}" class="absolute inset-0 h-full w-full object-cover" src="{{ banner.image_url }}">
-      <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-      <div class="absolute inset-x-0 bottom-0 z-10 p-6 sm:p-10">
-        <h1 class="max-w-3xl text-3xl font-black leading-tight tracking-[-.04em] sm:text-6xl">{{ banner.title }}</h1>
-        <span class="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-black text-ink">Открыть →</span>
-      </div>
+      <img alt="" class="block h-auto w-full" src="{{ banner.image_url }}">
       {% else %}
-      <div class="hero-grid absolute inset-0 px-6 py-10 sm:px-12 sm:py-16">
+      <div class="hero-grid relative min-h-[20rem] px-6 py-10 text-white sm:min-h-[27rem] sm:px-12 sm:py-16">
         <div class="relative z-10 max-w-xl">
           <p class="mb-5 text-xs font-black uppercase tracking-[.28em] text-white/55">Коллекция недели</p>
-          <h1 class="text-4xl font-black leading-[.95] tracking-[-.055em] sm:text-7xl">{{ banner.title }}</h1>
           <p class="mt-6 max-w-md text-base leading-relaxed text-white/65">Оригинальные товары, живая проверка наличия и оформление прямо внутри Telegram.</p>
-          <span class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink">Открыть →</span>
         </div>
         <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
       </div>
