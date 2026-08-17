@@ -149,7 +149,7 @@ async def sync_catalog() -> SyncReport:
     return await _apply_catalog(await load_catalog_source())
 
 
-@plugin.setup()
+# @plugin.setup()
 async def import_catalog() -> None:
     try:
         report = await sync_catalog()

@@ -1,11 +1,15 @@
 const tg = window.Telegram?.WebApp;
 if (tg) {
+    const initialTelegramColor = document.documentElement.dataset.theme === 'dark'
+        ? '#121210'
+        : '#f5f1e8';
     for (const [method, args] of [
         ['ready', []],
         ['expand', []],
         ['disableVerticalSwipes', []],
-        ['setHeaderColor', ['#f5f1e8']],
-        ['setBackgroundColor', ['#f5f1e8']]
+        ['setHeaderColor', [initialTelegramColor]],
+        ['setBackgroundColor', [initialTelegramColor]],
+        ['setBottomBarColor', [initialTelegramColor]]
     ]) {
         try { tg[method]?.(...args); } catch (_) {}
     }
@@ -18,6 +22,7 @@ const THEME_KEY = 'fyvessa.theme';
 const fragmentRequests = new WeakMap();
 const cartUpdates = new Map();
 let navigationSequence = 0;
+let themeSequence = 0;
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 function applyTheme(theme) {
@@ -32,67 +37,68 @@ function applyTheme(theme) {
     try {
         tg?.setHeaderColor?.(color);
         tg?.setBackgroundColor?.(color);
+        tg?.setBottomBarColor?.(color);
     } catch (_) {}
 }
 
 function toggleTheme() {
+    const sequence = ++themeSequence;
     const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.classList.add('theme-transitioning');
+    void document.documentElement.offsetWidth;
     try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
     applyTheme(theme);
+    clearTimeout(window.__fyvessaThemeTimer);
+    window.__fyvessaThemeTimer = setTimeout(() => {
+        if (sequence === themeSequence) {
+            document.documentElement.classList.remove('theme-transitioning');
+        }
+    }, 360);
 }
 
-function initAutoSliders(root = document) {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    root.querySelectorAll('[data-auto-slider]').forEach((slider) => {
-        if (slider.__fyvessaSliderTimer) return;
-        const advance = () => {
-            if (!slider.isConnected) {
-                clearInterval(slider.__fyvessaSliderTimer);
-                return;
-            }
-            const firstCard = slider.firstElementChild;
-            if (!firstCard || slider.scrollWidth <= slider.clientWidth) return;
-            const step = firstCard.getBoundingClientRect().width + 12;
-            const atEnd = slider.scrollLeft + slider.clientWidth >= slider.scrollWidth - step / 2;
-            slider.scrollTo({left: atEnd ? 0 : slider.scrollLeft + step, behavior: 'smooth'});
+function initBannerCarousels(root = document) {
+    root.querySelectorAll('[data-banner-carousel]').forEach((carousel) => {
+        const slider = carousel.querySelector('[data-banner-slider]');
+        const slides = [...carousel.querySelectorAll('[data-banner-slide]')];
+        const dots = [...carousel.querySelectorAll('[data-banner-dot]')];
+        if (!slider || slides.length < 1 || slider.__fyvessaBannerReady) return;
+        slider.__fyvessaBannerReady = true;
+
+        const activeIndex = () => Math.max(
+            0,
+            Math.min(slides.length - 1, Math.round(slider.scrollLeft / (slider.clientWidth || 1))),
+        );
+        const updateDots = () => {
+            const current = activeIndex();
+            dots.forEach((dot, index) => dot.classList.toggle('is-active', index === current));
         };
+        const goTo = (index) => slider.scrollTo({
+            left: slider.clientWidth * ((index + slides.length) % slides.length),
+            behavior: 'smooth',
+        });
+        const stop = () => clearInterval(slider.__fyvessaBannerTimer);
         const resume = () => {
-            clearInterval(slider.__fyvessaSliderTimer);
-            slider.__fyvessaSliderTimer = setInterval(advance, 3800);
+            stop();
+            if (slides.length < 2 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            slider.__fyvessaBannerTimer = setInterval(() => {
+                if (!slider.isConnected) return stop();
+                goTo(activeIndex() + 1);
+            }, 5000);
         };
-        slider.addEventListener('pointerdown', () => clearInterval(slider.__fyvessaSliderTimer));
+
+        let scrollTimer;
+        slider.addEventListener('scroll', () => {
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(updateDots, 80);
+        }, {passive: true});
+        slider.addEventListener('pointerdown', stop);
         slider.addEventListener('pointerup', resume);
         slider.addEventListener('pointercancel', resume);
-        resume();
-    });
-
-    root.querySelectorAll('[data-auto-feed]').forEach((feed) => {
-        if (feed.__fyvessaFeedTimer) return;
-        const advance = () => {
-            if (!feed.isConnected) {
-                clearInterval(feed.__fyvessaFeedTimer);
-                return;
-            }
-            if (feed.scrollHeight <= feed.clientHeight) return;
-            const firstCard = feed.firstElementChild;
-            const gap = parseFloat(getComputedStyle(feed).rowGap) || 32;
-            const step = (firstCard?.getBoundingClientRect().height || 260) + gap;
-            const atEnd = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - step / 2;
-            if (atEnd) {
-                feed.style.scrollBehavior = 'auto';
-                feed.scrollTop = 0;
-                requestAnimationFrame(() => { feed.style.scrollBehavior = ''; });
-            } else {
-                feed.scrollTo({top: feed.scrollTop + step, behavior: 'smooth'});
-            }
-        };
-        const resume = () => {
-            clearInterval(feed.__fyvessaFeedTimer);
-            feed.__fyvessaFeedTimer = setInterval(advance, 3800);
-        };
-        feed.addEventListener('pointerdown', () => clearInterval(feed.__fyvessaFeedTimer));
-        feed.addEventListener('pointerup', resume);
-        feed.addEventListener('pointercancel', resume);
+        dots.forEach((dot, index) => dot.addEventListener('click', () => {
+            goTo(index);
+            resume();
+        }));
+        updateDots();
         resume();
     });
 }
@@ -341,6 +347,51 @@ function adjustCartBadge(delta) {
 async function refreshShopState() {
     try { telegramAuthorization(); } catch (_) { return; }
     try { applyShopState(await api('/api/shop-state')); } catch (_) {}
+}
+
+async function copyReferralLink(button) {
+    const link = document.querySelector('[data-referral-link]')?.textContent?.trim();
+    if (!link || !link.startsWith('http')) return showToast('Ссылка пока недоступна');
+    try {
+        await navigator.clipboard.writeText(link);
+    } catch (_) {
+        const input = document.createElement('textarea');
+        input.value = link;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+    }
+    if (button) button.textContent = 'Скопировано ✓';
+    showToast('Реферальная ссылка скопирована');
+}
+
+function shareReferralLink() {
+    const link = document.querySelector('[data-referral-link]')?.textContent?.trim();
+    if (!link || !link.startsWith('http')) return showToast('Ссылка пока недоступна');
+    const target = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Присоединяйся к Fyvessa')}`;
+    try {
+        if (tg?.openTelegramLink) tg.openTelegramLink(target);
+        else location.assign(target);
+    } catch (_) {
+        location.assign(target);
+    }
+}
+
+async function claimReferralReward(channelId, button) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Проверяем…';
+    try {
+        const result = await api(`/api/referrals/${channelId}/claim`, {method: 'POST'});
+        const container = document.querySelector('[data-auth-fragment="/api/referrals"]');
+        if (container) await loadProtectedFragment(container, {quiet: true});
+        showToast(result.status === 'approved' ? 'Подписка подтверждена' : 'Отправлено на проверку');
+    } catch (error) {
+        showToast(error.message);
+        button.disabled = false;
+        button.textContent = originalText;
+    }
 }
 
 async function refreshCart(options = {}) {
@@ -659,7 +710,7 @@ async function hydratePage(root = document) {
     const checkoutForm = root.querySelector('#checkout-form');
     restoreFormDraft(checkoutForm, CHECKOUT_DRAFT_KEY);
     syncPromoCodeField(checkoutForm);
-    initAutoSliders(root);
+    initBannerCarousels(root);
     await refreshShopState();
     const product = root.querySelector('[data-record-product-view]');
     if (product) recordProductView(Number(product.dataset.recordProductView));

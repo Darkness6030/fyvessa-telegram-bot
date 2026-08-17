@@ -4,7 +4,7 @@ from typing import Optional, Self, Sequence
 
 from rewire import simple_plugin
 from rewire_sqlmodel import SQLModel, session_context
-from sqlalchemy import BigInteger, Text, func
+from sqlalchemy import BigInteger, Index, Text, func
 from sqlmodel import Field, col, select
 
 plugin = simple_plugin()
@@ -124,6 +124,7 @@ class User(SQLModel, table=True):
         index=True,
         ondelete='SET NULL',
     )
+    referral_discount_awarded_at: Optional[datetime] = None
 
     coin_balance: Decimal = Field(default=Decimal(0), decimal_places=2)
     personal_discount_percent: Decimal = Field(default=Decimal(0), decimal_places=2)
@@ -353,6 +354,11 @@ class Order(SQLModel, table=True):
     delivery_method: str = ''
     pickup_point_address: str = Field(default='', sa_type=Text)
     promo_code_id: Optional[int] = Field(default=None, foreign_key='promocode.id')
+    partner_payout_id: Optional[int] = Field(
+        default=None,
+        foreign_key='partnerpayout.id',
+        index=True,
+    )
     discount_mode: str = 'none'
     product_discount_total: Decimal = Field(default=Decimal('0'), decimal_places=2)
     personal_discount_percent: Decimal = Field(default=Decimal('0'), decimal_places=2)
@@ -365,6 +371,8 @@ class Order(SQLModel, table=True):
     diana_share: Decimal = Field(default=Decimal('0'), decimal_places=2)
     bulat_share: Decimal = Field(default=Decimal('0'), decimal_places=2)
     partner_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    purchase_coin_percent: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    purchase_coins_awarded: Decimal = Field(default=Decimal('0'), decimal_places=2)
 
     payment_reported_at: Optional[datetime] = None
     paid_at: Optional[datetime] = Field(default=None, index=True)
@@ -379,6 +387,10 @@ class Order(SQLModel, table=True):
             query = query.filter_by(user_id=user_id)
 
         return await query.first()
+
+    @classmethod
+    async def get_by_id_for_update(cls, order_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=order_id).with_for_update().first()
 
     @classmethod
     async def get_recent(cls, user_id: Optional[int] = None, limit: Optional[int] = 15) -> list[Self]:
@@ -430,6 +442,225 @@ class CoinTransaction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     user_id: int = Field(sa_type=BigInteger, foreign_key='user.id', index=True)
     order_id: Optional[int] = Field(default=None, foreign_key='order.id', index=True)
+    social_channel_id: Optional[int] = Field(
+        default=None,
+        foreign_key='socialchannel.id',
+        index=True,
+    )
+    referral_reward_id: Optional[int] = Field(
+        default=None,
+        foreign_key='referralreward.id',
+        index=True,
+    )
     amount: Decimal = Field(decimal_places=2)
     balance_after: Decimal = Field(decimal_places=2)
     reason: str
+
+    @classmethod
+    async def get_recent(
+        cls,
+        user_id: Optional[int] = None,
+        limit: int = 30,
+    ) -> list[Self]:
+        query = cls.select()
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        return list(await query.order_by(cls.created_at.desc()).limit(limit).all())
+
+
+class AppSetting(SQLModel, table=True):
+    __table_args__ = (Index('uq_appsetting_key', 'key', unique=True),)
+
+    id: int = Field(primary_key=True)
+    key: str = Field(index=True)
+    value: str = ''
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    @classmethod
+    async def get_by_key(cls, key: str) -> Optional[Self]:
+        return await cls.select().filter_by(key=key).first()
+
+
+class Banner(SQLModel, table=True):
+    id: int = Field(primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    title: str
+    image_url: str = ''
+    target_url: str = '/catalog'
+    position: int = Field(default=0, index=True)
+    is_active: bool = Field(default=True, index=True)
+
+    @classmethod
+    async def get_by_id(cls, banner_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=banner_id).first()
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().order_by(cls.position, cls.id).all())
+
+    @classmethod
+    async def get_active(cls) -> list[Self]:
+        return list(
+            await cls.select()
+            .where(col(cls.is_active).is_(True))
+            .order_by(cls.position, cls.id)
+            .all()
+        )
+
+
+class SocialChannel(SQLModel, table=True):
+    id: int = Field(primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    platform: str = Field(index=True)
+    account_name: str
+    url: str
+    coin_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    telegram_chat_id: Optional[str] = None
+    is_active: bool = Field(default=True, index=True)
+
+    @property
+    def supports_automatic_check(self) -> bool:
+        return self.platform.casefold() == 'telegram' and bool(self.telegram_chat_id)
+
+    @classmethod
+    async def get_by_id(cls, channel_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=channel_id).first()
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().order_by(cls.created_at.desc()).all())
+
+    @classmethod
+    async def get_active(cls) -> list[Self]:
+        return list(
+            await cls.select()
+            .where(col(cls.is_active).is_(True))
+            .order_by(cls.created_at, cls.id)
+            .all()
+        )
+
+
+class ReferralReward(SQLModel, table=True):
+    __table_args__ = (
+        Index(
+            'uq_referralreward_invited_channel',
+            'invited_user_id',
+            'social_channel_id',
+            unique=True,
+        ),
+    )
+
+    id: int = Field(primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    invited_user_id: int = Field(
+        sa_type=BigInteger,
+        foreign_key='user.id',
+        index=True,
+    )
+    referrer_id: int = Field(
+        sa_type=BigInteger,
+        foreign_key='user.id',
+        index=True,
+    )
+    social_channel_id: int = Field(foreign_key='socialchannel.id', index=True)
+    status: str = Field(default='pending', index=True)
+    reward_amount: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    verified_at: Optional[datetime] = None
+    reviewed_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
+
+    @classmethod
+    async def get_by_id(cls, reward_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=reward_id).first()
+
+    @classmethod
+    async def get_by_id_for_update(cls, reward_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=reward_id).with_for_update().first()
+
+    @classmethod
+    async def get_for_user_channel(
+        cls,
+        invited_user_id: int,
+        social_channel_id: int,
+    ) -> Optional[Self]:
+        return await cls.select().filter_by(
+            invited_user_id=invited_user_id,
+            social_channel_id=social_channel_id,
+        ).first()
+
+    @classmethod
+    async def get_for_invited_user(cls, invited_user_id: int) -> list[Self]:
+        return list(
+            await cls.select()
+            .filter_by(invited_user_id=invited_user_id)
+            .order_by(cls.created_at)
+            .all()
+        )
+
+    @classmethod
+    async def get_recent(
+        cls,
+        status: Optional[str] = None,
+        limit: int = 30,
+    ) -> list[Self]:
+        query = cls.select()
+        if status:
+            query = query.filter_by(status=status)
+        return list(await query.order_by(cls.created_at.desc()).limit(limit).all())
+
+    @classmethod
+    async def get_all(cls) -> list[Self]:
+        return list(await cls.select().all())
+
+
+class PartnerPayout(SQLModel, table=True):
+    __table_args__ = (
+        Index(
+            'uq_partnerpayout_promo_period',
+            'promo_code_id',
+            'period_ended_at',
+            unique=True,
+        ),
+    )
+
+    id: int = Field(primary_key=True)
+    generated_at: datetime = Field(default_factory=datetime.now, index=True)
+    period_started_at: Optional[datetime] = None
+    period_ended_at: datetime = Field(index=True)
+    promo_code_id: Optional[int] = Field(
+        default=None,
+        foreign_key='promocode.id',
+        index=True,
+    )
+    partner_name_snapshot: str
+    promo_code_snapshot: str
+    reward_percent_snapshot: Decimal = Field(decimal_places=2)
+    orders_count: int
+    orders_total: Decimal = Field(decimal_places=2)
+    payout_amount: Decimal = Field(decimal_places=2)
+    status: str = Field(default='pending', index=True)
+    paid_at: Optional[datetime] = Field(default=None, index=True)
+    paid_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
+
+    @classmethod
+    async def get_by_id(cls, payout_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=payout_id).first()
+
+    @classmethod
+    async def get_by_id_for_update(cls, payout_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=payout_id).with_for_update().first()
+
+    @classmethod
+    async def get_recent(
+        cls,
+        status: Optional[str] = None,
+        limit: Optional[int] = 30,
+    ) -> list[Self]:
+        query = cls.select()
+        if status:
+            query = query.filter_by(status=status)
+        query = query.order_by(cls.generated_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        return list(await query.all())

@@ -13,6 +13,7 @@ from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
 from src.models import User
+from src.referrals import initialize_referral_rewards
 from src.settings import get_settings
 
 
@@ -31,7 +32,7 @@ router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
 def create_main_keyboard() -> InlineKeyboardMarkup:
     settings = get_settings()
     return inline_keyboard([
-        ('СТАРТ', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
+        ('СТАРТ', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/')),
         ('⭐ Отзывы', settings.reviews_channel_url),
         ('💬 Поддержка', settings.support_url),
         ('📣 Канал', settings.channel_url),
@@ -47,19 +48,20 @@ async def start(message: Message, command: CommandObject):
         if referrer:
             referrer_id = referrer.id
 
-    await User.get_or_create(
+    user = await User.get_or_create(
         user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
         referrer_id=referrer_id,
     )
+    await initialize_referral_rewards(user)
 
     await message.answer(
         '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'
         'Здесь можно найти нужный товар, посмотреть новинки и популярное, '
         'использовать скидки и коины и оформить заказ прямо в Telegram.\n\n'
-        'Нажмите «СТАРТ», чтобы открыть каталог. Если понадобится помощь — '
+        'Нажмите «СТАРТ», чтобы открыть магазин. Если понадобится помощь — '
         'поддержка рядом.',
         reply_markup=create_main_keyboard(),
     )

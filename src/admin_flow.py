@@ -2,7 +2,10 @@ import html
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
+from uuid import uuid4
 
 from aiogram import Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -21,12 +24,24 @@ from src.catalog import CatalogValidationError, sync_catalog
 from src.keyboards import inline_keyboard
 from src.models import (
     AvailabilityRequest,
+    Banner,
+    CoinTransaction,
     Order,
+    PartnerPayout,
     Product,
     Promocode,
+    ReferralReward,
+    SocialChannel,
     User,
 )
 from src.orders import cancel_order, confirm_payment, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
+from src.payouts import current_partner_accruals, mark_payout_paid, next_payout_cutoff
+from src.referrals import (
+    approve_referral_reward,
+    get_purchase_coin_percent,
+    reject_referral_reward,
+    set_purchase_coin_percent,
+)
 from src.settings import SettingsValidationError, sync_settings
 
 
@@ -74,8 +89,48 @@ class PromocodeActionCallback(CallbackData, prefix='pma'):
     page: int = 0
 
 
+class PayoutActionCallback(CallbackData, prefix='pay'):
+    action: str
+    payout_id: int = 0
+    page: int = 0
+
+
+class BannerActionCallback(CallbackData, prefix='bnr'):
+    action: str
+    banner_id: int = 0
+    page: int = 0
+
+
+class SocialActionCallback(CallbackData, prefix='soc'):
+    action: str
+    channel_id: int = 0
+    page: int = 0
+
+
+class ReferralReviewCallback(CallbackData, prefix='ref'):
+    action: str
+    reward_id: int
+    page: int = 0
+
+
+class CoinSettingsCallback(CallbackData, prefix='coin'):
+    action: str
+
+
 class PromocodeForm(StatesGroup):
     details = State()
+
+
+class BannerForm(StatesGroup):
+    details = State()
+
+
+class SocialForm(StatesGroup):
+    details = State()
+
+
+class CoinSettingsForm(StatesGroup):
+    percent = State()
 
 
 AVAILABILITY_LABELS = {
@@ -178,6 +233,33 @@ async def notify_payment_review(order: Order, user: User) -> bool:
     )
 
 
+async def notify_referral_review(
+    reward: ReferralReward,
+    channel: SocialChannel,
+    user: User,
+) -> bool:
+    return await bot.send_message(
+        Config.admin_chat_id,
+        '<b>Подписка ожидает ручной проверки</b>\n\n'
+        f'Пользователь: <code>{user.id}</code>\n'
+        f'Площадка: {html.escape(channel.platform)} / '
+        f'{html.escape(channel.account_name)}\n'
+        f'Ссылка: {html.escape(channel.url)}\n'
+        f'Награда пригласившему: {channel.coin_reward} коинов',
+        reply_markup=inline_keyboard([
+            (
+                '✅ Подтвердить',
+                ReferralReviewCallback(action='approve', reward_id=reward.id),
+            ),
+            (
+                '↩️ Вернуть',
+                ReferralReviewCallback(action='reject', reward_id=reward.id),
+            ),
+            ('🏠 Меню', AdminSectionCallback(section='menu')),
+        ], 2, 1),
+    )
+
+
 ADMIN_TEXT = (
     '<b>Администрирование Fyvessa</b>\n\n'
     'Выберите очередь или действие. Товары редактируются в Google Sheets, остальные '
@@ -207,6 +289,11 @@ def _admin_keyboard():
             ('💳 Заказы и оплаты', 'orders'),
             ('👥 Пользователи', 'users'),
             ('🎟 Промокоды', 'promos'),
+            ('💸 Выплаты партнёрам', 'payouts'),
+            ('🖼 Рекламные карточки', 'banners'),
+            ('🌐 Социальные сети', 'socials'),
+            ('🤝 Реферальные проверки', 'referrals'),
+            ('🪙 Настройки коинов', 'coins'),
             ('📊 Сводка', 'summary'),
             ('🔄 Синхронизировать таблицу', 'sync'),
             ('❓ Команды и подсказки', 'help'),
@@ -225,6 +312,13 @@ def _back_keyboard(section: str = 'menu', page: int = 0):
         'orders': '← К заказам',
         'promos': '← К промокодам',
         'users': '← К пользователям',
+        'payout_current': '← К начислениям',
+        'payout_pending': '← К ожидающим выплатам',
+        'payout_archive': '← К архиву',
+        'banners': '← К карточкам',
+        'socials': '← К соцсетям',
+        'referrals': '← К проверкам',
+        'coins': '← К коинам',
     }
 
     return inline_keyboard([
@@ -304,6 +398,22 @@ async def _financial_summary(orders: list[Order]) -> str:
     paid_total = total('paid_total')
     owner_total = sum(owner_earnings.values(), Decimal('0'))
     partner_total = total('partner_reward')
+    payouts = await PartnerPayout.get_recent(limit=None)
+    partner_paid = sum(
+        (payout.payout_amount for payout in payouts if payout.status == 'paid'),
+        Decimal('0'),
+    )
+    partner_pending = sum(
+        (payout.payout_amount for payout in payouts if payout.status == 'pending'),
+        Decimal('0'),
+    )
+    partner_current = sum(
+        (
+            order.partner_reward for order in paid_orders
+            if order.partner_payout_id is None
+        ),
+        Decimal('0'),
+    )
     average_order = paid_total / len(paid_orders) if paid_orders else Decimal('0')
     awaiting_total = sum(
         (order.paid_total for order in unpaid_orders), Decimal('0'),
@@ -324,10 +434,13 @@ async def _financial_summary(orders: list[Order]) -> str:
         '<b>К выплате владельцам (за всю историю)</b>\n'
         f'{owner_lines}\n'
         f'Итого владельцам: <b>{_rubles(owner_total)}</b>\n\n'
-        '<b>К выплате промопартнёрам</b>\n'
+        '<b>Начислено промопартнёрам за всю историю</b>\n'
         f'{partner_lines}\n'
-        f'Итого промопартнёрам: <b>{_rubles(partner_total)}</b>\n\n'
-        '<i>Выплаты вручную не списываются: показаны все начисления за историю.</i>'
+        f'Всего начислено: <b>{_rubles(partner_total)}</b>\n'
+        f'Текущий период: <b>{_rubles(partner_current)}</b>\n'
+        f'Ожидает выплаты: <b>{_rubles(partner_pending)}</b>\n'
+        f'Уже выплачено: <b>{_rubles(partner_paid)}</b>\n'
+        f'Осталось выплатить: <b>{_rubles(partner_current + partner_pending)}</b>'
     )
 
 
@@ -713,6 +826,287 @@ async def _save_promocode(value: str) -> Promocode:
     return promocode
 
 
+def _section_navigation(
+    section: str,
+    page: int,
+    total: int,
+    parent: str,
+) -> list[tuple[str, Any]]:
+    buttons = []
+    if page > 0:
+        buttons.append((
+            f'← {page}/{total}',
+            AdminSectionCallback(section=section, page=page - 1),
+        ))
+    if page + 1 < total:
+        buttons.append((
+            f'{page + 2}/{total} →',
+            AdminSectionCallback(section=section, page=page + 1),
+        ))
+    buttons.extend([
+        ('← К разделу', AdminSectionCallback(section=parent)),
+        ('🏠 Меню', AdminSectionCallback(section='menu')),
+    ])
+    return buttons
+
+
+async def _show_payout_menu(callback: CallbackQuery) -> None:
+    pending = await PartnerPayout.get_recent(status='pending', limit=None)
+    archive = await PartnerPayout.get_recent(status='paid', limit=None)
+    await _edit_message(
+        callback,
+        '<b>Выплаты партнёрам</b>\n\n'
+        f'Следующая фиксация: <b>{next_payout_cutoff():%d.%m.%Y %H:%M}</b>\n'
+        f'Ожидают выплаты: <b>{len(pending)}</b>\n'
+        f'В архиве: <b>{len(archive)}</b>',
+        inline_keyboard([
+            ('📈 Текущие начисления', AdminSectionCallback(section='payout_current')),
+            ('⏳ Ожидают выплаты', AdminSectionCallback(section='payout_pending')),
+            ('🗃 Архив выплат', AdminSectionCallback(section='payout_archive')),
+            ('🏠 Меню', AdminSectionCallback(section='menu')),
+        ]),
+    )
+
+
+async def _show_current_accruals(callback: CallbackQuery, page: int = 0) -> None:
+    accruals = await current_partner_accruals()
+    if not accruals:
+        return await _edit_message(
+            callback,
+            '<b>Текущие начисления</b>\n\nПартнёрских промокодов пока нет.',
+            _back_keyboard(),
+        )
+    page = min(page, len(accruals) - 1)
+    accrual = accruals[page]
+    promocode = accrual.promocode
+    await _edit_message(
+        callback,
+        '<b>Текущие начисления</b>\n\n'
+        f'Партнёр: <b>{html.escape(promocode.partner_name)}</b>\n'
+        f'Промокод: <code>{html.escape(promocode.code)}</code>\n'
+        f'Оплаченных заказов: <b>{accrual.orders_count}</b>\n'
+        f'Сумма заказов: <b>{_rubles(accrual.orders_total)}</b>\n'
+        f'Процент по начислениям: <b>{accrual.reward_percent}%</b>\n'
+        f'К выплате: <b>{_rubles(accrual.payout_amount)}</b>\n'
+        f'Следующая фиксация: <b>{next_payout_cutoff():%d.%m.%Y %H:%M}</b>',
+        inline_keyboard(
+            _section_navigation('payout_current', page, len(accruals), 'payouts'),
+            2, 1, 1,
+        ),
+    )
+
+
+def _payout_text(payout: PartnerPayout) -> str:
+    paid_line = (
+        f'\nФактически выплачено: <b>{payout.paid_at:%d.%m.%Y %H:%M}</b>'
+        if payout.paid_at else ''
+    )
+    return (
+        f'<b>{"Архивная выплата" if payout.status == "paid" else "Ожидает выплаты"}</b>\n\n'
+        f'Партнёр: <b>{html.escape(payout.partner_name_snapshot)}</b>\n'
+        f'Промокод: <code>{html.escape(payout.promo_code_snapshot)}</code>\n'
+        f'Сформировано: {payout.generated_at:%d.%m.%Y %H:%M}\n'
+        f'Заказов: <b>{payout.orders_count}</b>\n'
+        f'Сумма заказов: <b>{_rubles(payout.orders_total)}</b>\n'
+        f'Процент: <b>{payout.reward_percent_snapshot}%</b>\n'
+        f'Сумма выплаты: <b>{_rubles(payout.payout_amount)}</b>\n'
+        f'Статус: <b>{"Выплачено" if payout.status == "paid" else "Ожидает выплаты"}</b>'
+        f'{paid_line}'
+    )
+
+
+async def _show_payouts(
+    callback: CallbackQuery,
+    status: str,
+    section: str,
+    page: int = 0,
+) -> None:
+    payouts = await PartnerPayout.get_recent(status=status, limit=None)
+    if not payouts:
+        return await _edit_message(
+            callback,
+            '<b>Выплаты партнёрам</b>\n\nЗаписей в этом разделе пока нет.',
+            inline_keyboard([
+                ('← К выплатам', AdminSectionCallback(section='payouts')),
+                ('🏠 Меню', AdminSectionCallback(section='menu')),
+            ]),
+        )
+    page = min(page, len(payouts) - 1)
+    payout = payouts[page]
+    buttons = []
+    if status == 'pending':
+        buttons.append((
+            '✅ Оплачено',
+            PayoutActionCallback(action='paid', payout_id=payout.id, page=page),
+        ))
+    buttons.extend(_section_navigation(section, page, len(payouts), 'payouts'))
+    await _edit_message(callback, _payout_text(payout), inline_keyboard(buttons, 1, 2, 1, 1))
+
+
+def _valid_url(value: str, allow_local: bool = False) -> str:
+    value = value.strip()
+    if allow_local and value.startswith('/'):
+        return value
+    parsed = urlsplit(value)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise ValueError('Ссылка должна начинаться с https://')
+    return value
+
+
+def _banner_text(banner: Banner) -> str:
+    image = html.escape(banner.image_url) if banner.image_url else 'без изображения'
+    return (
+        f'<b>Рекламная карточка №{banner.id}</b>\n\n'
+        f'Название: <b>{html.escape(banner.title)}</b>\n'
+        f'Изображение: {image}\n'
+        f'Переход: {html.escape(banner.target_url)}\n'
+        f'Порядок: <b>{banner.position}</b>\n'
+        f'Статус: <b>{"показывается" if banner.is_active else "скрыта"}</b>'
+    )
+
+
+def _banner_keyboard(banner: Banner, page: int, total: int):
+    return inline_keyboard([
+        ('✏️ Изменить', BannerActionCallback(action='edit', banner_id=banner.id, page=page)),
+        (
+            '🙈 Скрыть' if banner.is_active else '👁 Показать',
+            BannerActionCallback(action='toggle', banner_id=banner.id, page=page),
+        ),
+        ('➕ Добавить', BannerActionCallback(action='add', banner_id=banner.id, page=page)),
+        ('🗑 Удалить', BannerActionCallback(action='delete', banner_id=banner.id, page=page)),
+        *_admin_navigation('banners', page, total),
+    ], 2, 2, 2, 1)
+
+
+async def _show_banners(callback: CallbackQuery, page: int = 0) -> None:
+    banners = await Banner.get_all()
+    if not banners:
+        return await _edit_message(
+            callback,
+            '<b>Рекламные карточки</b>\n\nКарточек пока нет.',
+            inline_keyboard([
+                ('➕ Добавить', BannerActionCallback(action='add')),
+                ('🏠 Меню', AdminSectionCallback(section='menu')),
+            ]),
+        )
+    page = min(page, len(banners) - 1)
+    await _edit_message(
+        callback,
+        _banner_text(banners[page]),
+        _banner_keyboard(banners[page], page, len(banners)),
+    )
+
+
+def _social_text(channel: SocialChannel) -> str:
+    check_mode = 'автоматически' if channel.supports_automatic_check else 'администратором'
+    return (
+        f'<b>Социальная сеть №{channel.id}</b>\n\n'
+        f'Площадка: <b>{html.escape(channel.platform)}</b>\n'
+        f'Аккаунт: <b>{html.escape(channel.account_name)}</b>\n'
+        f'Ссылка: {html.escape(channel.url)}\n'
+        f'Награда: <b>{channel.coin_reward} коинов</b>\n'
+        f'Проверка: <b>{check_mode}</b>\n'
+        f'Telegram chat ID: <code>{html.escape(channel.telegram_chat_id or "—")}</code>\n'
+        f'Статус: <b>{"включена" if channel.is_active else "отключена"}</b>'
+    )
+
+
+def _social_keyboard(channel: SocialChannel, page: int, total: int):
+    return inline_keyboard([
+        ('✏️ Изменить', SocialActionCallback(action='edit', channel_id=channel.id, page=page)),
+        (
+            '⏸ Отключить' if channel.is_active else '▶️ Включить',
+            SocialActionCallback(action='toggle', channel_id=channel.id, page=page),
+        ),
+        ('➕ Добавить', SocialActionCallback(action='add', channel_id=channel.id, page=page)),
+        *_admin_navigation('socials', page, total),
+    ], 2, 1, 2, 1)
+
+
+async def _show_socials(callback: CallbackQuery, page: int = 0) -> None:
+    channels = await SocialChannel.get_all()
+    if not channels:
+        return await _edit_message(
+            callback,
+            '<b>Социальные сети</b>\n\nПлощадки пока не добавлены.',
+            inline_keyboard([
+                ('➕ Добавить', SocialActionCallback(action='add')),
+                ('🏠 Меню', AdminSectionCallback(section='menu')),
+            ]),
+        )
+    page = min(page, len(channels) - 1)
+    await _edit_message(
+        callback,
+        _social_text(channels[page]),
+        _social_keyboard(channels[page], page, len(channels)),
+    )
+
+
+async def _referral_review_text(reward: ReferralReward) -> str:
+    invited = await User.get_by_id(reward.invited_user_id)
+    referrer = await User.get_by_id(reward.referrer_id)
+    channel = await SocialChannel.get_by_id(reward.social_channel_id)
+    return (
+        '<b>Реферальная проверка</b>\n\n'
+        f'Подписывается: <code>{reward.invited_user_id}</code> '
+        f'({html.escape(invited.username or "без username") if invited else "удалён"})\n'
+        f'Пригласил: <code>{reward.referrer_id}</code> '
+        f'({html.escape(referrer.username or "без username") if referrer else "удалён"})\n'
+        f'Площадка: <b>{html.escape(channel.platform) if channel else "удалена"}</b> / '
+        f'{html.escape(channel.account_name) if channel else "—"}\n'
+        f'Награда: <b>{channel.coin_reward if channel else 0} коинов</b>\n'
+        f'Статус: <b>{reward.status}</b>'
+    )
+
+
+async def _show_referral_reviews(callback: CallbackQuery, page: int = 0) -> None:
+    rewards = await ReferralReward.get_recent(status='review')
+    if not rewards:
+        all_rewards = await ReferralReward.get_all()
+        approved = sum(item.status == 'approved' for item in all_rewards)
+        return await _edit_message(
+            callback,
+            '<b>Реферальные проверки</b>\n\n'
+            'Ожидающих ручной проверки нет.\n'
+            f'Всего подтверждено: <b>{approved}</b>',
+            _back_keyboard(),
+        )
+    page = min(page, len(rewards) - 1)
+    reward = rewards[page]
+    await _edit_message(
+        callback,
+        await _referral_review_text(reward),
+        inline_keyboard([
+            ('✅ Подтвердить', ReferralReviewCallback(action='approve', reward_id=reward.id, page=page)),
+            ('↩️ Вернуть', ReferralReviewCallback(action='reject', reward_id=reward.id, page=page)),
+            *_admin_navigation('referrals', page, len(rewards)),
+        ], 2, 2, 1),
+    )
+
+
+async def _show_coin_settings(callback: CallbackQuery) -> None:
+    percent = await get_purchase_coin_percent()
+    transactions = await CoinTransaction.get_recent(limit=10)
+    history = '\n'.join(
+        f'• {transaction.created_at:%d.%m %H:%M} · '
+        f'<code>{transaction.user_id}</code> · {transaction.amount:+} · '
+        f'{html.escape(transaction.reason)}'
+        for transaction in transactions
+    ) or '• Операций пока нет'
+    await _edit_message(
+        callback,
+        '<b>Настройки коинов</b>\n\n'
+        f'Процент коинов с покупки: <b>{percent}%</b>\n\n'
+        '<b>Последние начисления и списания</b>\n'
+        f'{history}',
+        inline_keyboard([
+            ('✏️ Изменить процент', CoinSettingsCallback(action='percent')),
+            ('🌐 Социальные сети и награды', AdminSectionCallback(section='socials')),
+            ('🏠 Меню', AdminSectionCallback(section='menu')),
+        ]),
+    )
+
+
 async def _resolve_availability(
     availability: AvailabilityRequest,
     status: str,
@@ -817,6 +1211,34 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
 
     elif callback_data.section == 'promos':
         await _show_promocodes(callback, callback_data.page)
+
+    elif callback_data.section == 'payouts':
+        await _show_payout_menu(callback)
+
+    elif callback_data.section == 'payout_current':
+        await _show_current_accruals(callback, callback_data.page)
+
+    elif callback_data.section == 'payout_pending':
+        await _show_payouts(
+            callback, 'pending', 'payout_pending', callback_data.page,
+        )
+
+    elif callback_data.section == 'payout_archive':
+        await _show_payouts(
+            callback, 'paid', 'payout_archive', callback_data.page,
+        )
+
+    elif callback_data.section == 'banners':
+        await _show_banners(callback, callback_data.page)
+
+    elif callback_data.section == 'socials':
+        await _show_socials(callback, callback_data.page)
+
+    elif callback_data.section == 'referrals':
+        await _show_referral_reviews(callback, callback_data.page)
+
+    elif callback_data.section == 'coins':
+        await _show_coin_settings(callback)
 
     elif callback_data.section == 'summary':
         products = await Product.get_all()
@@ -955,7 +1377,14 @@ async def availability_command(message: Message, command: CommandObject):
 async def _apply_order_action(order: Order, action: str, admin_id: int) -> bool:
     if action == 'paid':
         has_changed = await confirm_payment(order, admin_id)
-        message_text = f'✅ Оплата заказа <b>{html.escape(order.number)}</b> подтверждена.'
+        coin_text = (
+            f' Начислено <b>{order.purchase_coins_awarded}</b> коинов.'
+            if order.purchase_coins_awarded else ''
+        )
+        message_text = (
+            f'✅ Оплата заказа <b>{html.escape(order.number)}</b> подтверждена.'
+            f'{coin_text}'
+        )
     elif action == 'cancel':
         has_changed = await cancel_order(order, admin_id)
         message_text = f'Заказ <b>{html.escape(order.number)}</b> отменён.'
@@ -1256,6 +1685,311 @@ async def promocode_toggle_callback(
     )
 
     await callback.answer('Включён' if promocode.is_active else 'Отключён')
+
+
+@router.callback_query(PayoutActionCallback.filter())
+@transaction(1)
+async def payout_action(
+    callback: CallbackQuery,
+    callback_data: PayoutActionCallback,
+):
+    payout = await PartnerPayout.get_by_id(callback_data.payout_id)
+    if not payout:
+        return await callback.answer('Выплата не найдена', show_alert=True)
+    if callback_data.action == 'paid':
+        changed = await mark_payout_paid(payout, callback.from_user.id)
+        await _show_payouts(
+            callback,
+            'pending',
+            'payout_pending',
+            callback_data.page,
+        )
+        return await callback.answer('Перенесено в архив' if changed else 'Уже выплачено')
+    await callback.answer('Действие не найдено', show_alert=True)
+
+
+def _banner_prompt(banner: Banner | None = None) -> str:
+    current = (
+        '\n\nДля сохранения текущего изображения укажите <code>-</code>.'
+        if banner else ''
+    )
+    return (
+        f'<b>{"Изменить" if banner else "Новая"} рекламная карточка</b>\n\n'
+        'Вариант с URL — отправьте:\n'
+        '<code>Название | https://image.jpg | /catalog | 10</code>\n\n'
+        'Вариант с фото — прикрепите фото и добавьте подпись:\n'
+        '<code>Название | /catalog | 10</code>\n\n'
+        'Последнее число задаёт порядок. Ссылка перехода может быть внутренней '
+        '(/catalog) или внешней (https://...).'
+        f'{current}'
+    )
+
+
+@router.callback_query(BannerActionCallback.filter())
+@transaction(1)
+async def banner_action(
+    callback: CallbackQuery,
+    callback_data: BannerActionCallback,
+    state: FSMContext,
+):
+    banner = (
+        await Banner.get_by_id(callback_data.banner_id)
+        if callback_data.banner_id else None
+    )
+    if callback_data.action in {'add', 'edit'}:
+        if callback_data.action == 'edit' and not banner:
+            return await callback.answer('Карточка не найдена', show_alert=True)
+        await state.set_state(BannerForm.details)
+        await state.update_data(
+            banner_id=banner.id if banner and callback_data.action == 'edit' else 0,
+            page=callback_data.page,
+        )
+        return await _edit_message(
+            callback,
+            _banner_prompt(banner if callback_data.action == 'edit' else None),
+            _back_keyboard('banners', callback_data.page),
+        )
+    if not banner:
+        return await callback.answer('Карточка не найдена', show_alert=True)
+    if callback_data.action == 'toggle':
+        banner.is_active = not banner.is_active
+        banner.updated_at = datetime.now()
+        banner.add()
+        await _show_banners(callback, callback_data.page)
+        return await callback.answer('Статус изменён')
+    if callback_data.action == 'delete':
+        return await _edit_message(
+            callback,
+            f'<b>Удалить карточку «{html.escape(banner.title)}»?</b>',
+            inline_keyboard([
+                ('🗑 Да, удалить', BannerActionCallback(action='confirm_delete', banner_id=banner.id, page=callback_data.page)),
+                ('← Отмена', AdminSectionCallback(section='banners', page=callback_data.page)),
+            ]),
+        )
+    if callback_data.action == 'confirm_delete':
+        await banner.delete()
+        await _show_banners(callback, callback_data.page)
+        return await callback.answer('Карточка удалена')
+    await callback.answer('Действие не найдено', show_alert=True)
+
+
+@router.message(BannerForm.details)
+@transaction(1)
+async def banner_form(message: Message, state: FSMContext):
+    data = await state.get_data()
+    banner = await Banner.get_by_id(data.get('banner_id', 0))
+    try:
+        if message.photo:
+            parts = [part.strip() for part in (message.caption or '').split('|')]
+            if len(parts) != 3:
+                raise ValueError('Для фото нужна подпись: Название | Ссылка | Порядок')
+            title, target_url, position_text = parts
+            if not title:
+                raise ValueError('Название не может быть пустым')
+            target_url = _valid_url(target_url, allow_local=True)
+            position = int(position_text)
+            directory = Path('assets/banners')
+            directory.mkdir(parents=True, exist_ok=True)
+            destination = directory / f'{uuid4().hex}.jpg'
+            await bot.get_bot().download(message.photo[-1].file_id, destination=destination)
+            image_url = f'/banners/{destination.name}'
+        else:
+            parts = [part.strip() for part in (message.text or '').split('|')]
+            if len(parts) != 4:
+                raise ValueError('Формат: Название | URL изображения | Ссылка | Порядок')
+            title, image_url, target_url, position_text = parts
+            if not title:
+                raise ValueError('Название не может быть пустым')
+            if image_url == '-' and banner:
+                image_url = banner.image_url
+            elif image_url:
+                image_url = _valid_url(image_url, allow_local=True)
+            target_url = _valid_url(target_url, allow_local=True)
+            position = int(position_text)
+    except (ValueError, TypeError) as exc:
+        return await message.answer(
+            f'Не удалось сохранить: {html.escape(str(exc))}\n\n{_banner_prompt(banner)}',
+            reply_markup=_back_keyboard('banners', data.get('page', 0)),
+        )
+
+    if not banner:
+        banner = Banner(title=title)
+    banner.title = title
+    banner.image_url = image_url
+    banner.target_url = target_url
+    banner.position = position
+    banner.updated_at = datetime.now()
+    banner.add()
+    await session_context.get().flush()
+    await state.clear()
+    banners = await Banner.get_all()
+    page = next((index for index, item in enumerate(banners) if item.id == banner.id), 0)
+    await message.answer(
+        _banner_text(banner),
+        reply_markup=_banner_keyboard(banner, page, len(banners)),
+    )
+
+
+def _social_prompt(channel: SocialChannel | None = None) -> str:
+    return (
+        f'<b>{"Изменить" if channel else "Новая"} площадка</b>\n\n'
+        'Отправьте одной строкой:\n'
+        '<code>Telegram | Название канала | https://t.me/channel | 7 | @channel</code>\n\n'
+        'Для Instagram, TikTok, YouTube и других площадок вместо последнего '
+        'поля укажите <code>-</code> — такие подписки подтверждаются администратором. '
+        'Для Telegram bot должен быть администратором канала.'
+    )
+
+
+@router.callback_query(SocialActionCallback.filter())
+@transaction(1)
+async def social_action(
+    callback: CallbackQuery,
+    callback_data: SocialActionCallback,
+    state: FSMContext,
+):
+    channel = (
+        await SocialChannel.get_by_id(callback_data.channel_id)
+        if callback_data.channel_id else None
+    )
+    if callback_data.action in {'add', 'edit'}:
+        if callback_data.action == 'edit' and not channel:
+            return await callback.answer('Площадка не найдена', show_alert=True)
+        await state.set_state(SocialForm.details)
+        await state.update_data(
+            channel_id=channel.id if channel and callback_data.action == 'edit' else 0,
+            page=callback_data.page,
+        )
+        return await _edit_message(
+            callback,
+            _social_prompt(channel if callback_data.action == 'edit' else None),
+            _back_keyboard('socials', callback_data.page),
+        )
+    if not channel:
+        return await callback.answer('Площадка не найдена', show_alert=True)
+    if callback_data.action == 'toggle':
+        channel.is_active = not channel.is_active
+        channel.updated_at = datetime.now()
+        channel.add()
+        await _show_socials(callback, callback_data.page)
+        return await callback.answer('Статус изменён')
+    await callback.answer('Действие не найдено', show_alert=True)
+
+
+@router.message(SocialForm.details)
+@transaction(1)
+async def social_form(message: Message, state: FSMContext):
+    data = await state.get_data()
+    parts = [part.strip() for part in (message.text or '').split('|')]
+    try:
+        if len(parts) != 5:
+            raise ValueError('Нужно пять полей через |')
+        platform, account_name, url, reward_text, telegram_chat_id = parts
+        if not platform or not account_name:
+            raise ValueError('Площадка и название аккаунта обязательны')
+        url = _valid_url(url)
+        coin_reward = Decimal(reward_text.replace(',', '.'))
+        if not Decimal('0') <= coin_reward <= Decimal('1000000'):
+            raise ValueError('Награда должна быть от 0 до 1 000 000')
+        telegram_chat_id = None if telegram_chat_id == '-' else telegram_chat_id
+        if platform.casefold() == 'telegram' and not telegram_chat_id:
+            raise ValueError('Для автоматической проверки Telegram укажите @channel или chat ID')
+    except (ValueError, InvalidOperation) as exc:
+        return await message.answer(
+            f'Не удалось сохранить: {html.escape(str(exc))}\n\n{_social_prompt()}',
+            reply_markup=_back_keyboard('socials', data.get('page', 0)),
+        )
+
+    channel = await SocialChannel.get_by_id(data.get('channel_id', 0))
+    if not channel:
+        channel = SocialChannel(
+            platform=platform,
+            account_name=account_name,
+            url=url,
+        )
+    channel.platform = platform
+    channel.account_name = account_name
+    channel.url = url
+    channel.coin_reward = coin_reward
+    channel.telegram_chat_id = telegram_chat_id
+    channel.updated_at = datetime.now()
+    channel.add()
+    await session_context.get().flush()
+    await state.clear()
+    channels = await SocialChannel.get_all()
+    page = next((index for index, item in enumerate(channels) if item.id == channel.id), 0)
+    await message.answer(
+        _social_text(channel),
+        reply_markup=_social_keyboard(channel, page, len(channels)),
+    )
+
+
+@router.callback_query(ReferralReviewCallback.filter())
+@transaction(1)
+async def referral_review_action(
+    callback: CallbackQuery,
+    callback_data: ReferralReviewCallback,
+):
+    reward = await ReferralReward.get_by_id(callback_data.reward_id)
+    if not reward:
+        return await callback.answer('Запись не найдена', show_alert=True)
+    try:
+        if callback_data.action == 'approve':
+            changed = await approve_referral_reward(reward, callback.from_user.id)
+            await bot.send_message(
+                reward.invited_user_id,
+                'Подписка подтверждена. Награда начислена пригласившему вас пользователю.',
+            )
+            result = 'Подтверждено' if changed else 'Уже подтверждено'
+        elif callback_data.action == 'reject':
+            await reject_referral_reward(reward, callback.from_user.id)
+            await bot.send_message(
+                reward.invited_user_id,
+                'Подписка пока не подтверждена. Проверьте её и отправьте запрос повторно.',
+            )
+            result = 'Возвращено на повторную проверку'
+        else:
+            return await callback.answer('Действие не найдено', show_alert=True)
+    except ValueError as exc:
+        return await callback.answer(str(exc), show_alert=True)
+    await _show_referral_reviews(callback, callback_data.page)
+    await callback.answer(result)
+
+
+@router.callback_query(CoinSettingsCallback.filter())
+async def coin_settings_action(
+    callback: CallbackQuery,
+    callback_data: CoinSettingsCallback,
+    state: FSMContext,
+):
+    if callback_data.action != 'percent':
+        return await callback.answer('Действие не найдено', show_alert=True)
+    await state.set_state(CoinSettingsForm.percent)
+    await _edit_message(
+        callback,
+        '<b>Процент коинов с покупки</b>\n\n'
+        'Отправьте число от 0 до 100. Новое значение применяется только к заказам, '
+        'оплата которых будет подтверждена после изменения.',
+        _back_keyboard('coins'),
+    )
+
+
+@router.message(CoinSettingsForm.percent)
+@transaction(1)
+async def coin_settings_form(message: Message, state: FSMContext):
+    try:
+        value = Decimal((message.text or '').strip().replace(',', '.'))
+        value = await set_purchase_coin_percent(value)
+    except (InvalidOperation, ValueError) as exc:
+        return await message.answer(
+            f'Не удалось сохранить: {html.escape(str(exc))}',
+            reply_markup=_back_keyboard('coins'),
+        )
+    await state.clear()
+    await message.answer(
+        f'Процент коинов с новых оплаченных заказов: <b>{value}%</b>.',
+        reply_markup=_back_keyboard('coins'),
+    )
 
 
 @plugin.setup()

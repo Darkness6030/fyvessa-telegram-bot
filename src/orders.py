@@ -18,6 +18,7 @@ from src.models import (
     User,
 )
 from src.pricing import calculate_pricing, money, PricingLine
+from src.referrals import award_purchase_coins
 
 ORDER_STATUS_LABELS = {
     'awaiting_payment': 'Ожидает оплаты',
@@ -238,6 +239,7 @@ async def create_order_from_cart(
 
 
 async def report_payment(order: Order) -> bool:
+    order = await Order.get_by_id_for_update(order.id) or order
     if order.status == 'payment_review':
         return False
 
@@ -252,6 +254,7 @@ async def report_payment(order: Order) -> bool:
 
 
 async def confirm_payment(order: Order, admin_id: int) -> bool:
+    order = await Order.get_by_id_for_update(order.id) or order
     if order.payment_status == 'paid':
         return False
     if order.status != 'payment_review':
@@ -304,10 +307,15 @@ async def confirm_payment(order: Order, admin_id: int) -> bool:
             product.purchases_count += order_item.quantity
             product.add()
 
+    user = await User.get_by_id(order.user_id)
+    if user:
+        await award_purchase_coins(user, order)
+
     return True
 
 
 async def cancel_order(order: Order, admin_id: int) -> bool:
+    order = await Order.get_by_id_for_update(order.id) or order
     if order.status == 'cancelled':
         return False
 
@@ -337,6 +345,7 @@ async def cancel_order(order: Order, admin_id: int) -> bool:
 
 
 async def update_shipping_status(order: Order, status: str) -> bool:
+    order = await Order.get_by_id_for_update(order.id) or order
     if status not in {'assembling', 'shipped', 'delivered'}:
         raise ValueError('Неизвестный статус отправки')
     if order.payment_status != 'paid':

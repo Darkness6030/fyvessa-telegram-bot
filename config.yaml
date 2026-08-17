@@ -7,6 +7,10 @@ src:
   admin_flow:
     admin_chat_id: !env "ADMIN_CHAT_ID:"
     mini_app_url: !env "MINI_APP_URL:"
+  payouts:
+    admin_chat_id: !env "ADMIN_CHAT_ID:"
+    payout_hour: !env "PARTNER_PAYOUT_HOUR:12"
+    payout_timezone: !env "PARTNER_PAYOUT_TIMEZONE:Europe/Moscow"
 rewire:
   log:
     sinks:

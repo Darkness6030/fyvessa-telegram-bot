@@ -1,0 +1,259 @@
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+
+from aiogram.enums import ChatMemberStatus
+from aiogram.exceptions import TelegramAPIError
+from fastapi import HTTPException
+from rewire_sqlmodel import session_context
+
+from src.bot import get_bot, send_message
+from src.models import (
+    AppSetting,
+    CoinTransaction,
+    Order,
+    ReferralReward,
+    SocialChannel,
+    User,
+)
+from src.pricing import money
+
+PURCHASE_COIN_PERCENT_KEY = 'purchase_coin_percent'
+MAX_REFERRAL_DISCOUNT = Decimal('10')
+REFERRAL_DISCOUNT_STEP = Decimal('1')
+_bot_username = ''
+
+
+async def get_purchase_coin_percent() -> Decimal:
+    setting = await AppSetting.get_by_key(PURCHASE_COIN_PERCENT_KEY)
+    if not setting:
+        return Decimal('0')
+    try:
+        value = Decimal(setting.value)
+    except InvalidOperation:
+        return Decimal('0')
+    return min(max(value, Decimal('0')), Decimal('100'))
+
+
+async def set_purchase_coin_percent(value: Decimal) -> Decimal:
+    if not Decimal('0') <= value <= Decimal('100'):
+        raise ValueError('Процент должен быть от 0 до 100')
+    value = money(value)
+    setting = await AppSetting.get_by_key(PURCHASE_COIN_PERCENT_KEY)
+    if not setting:
+        setting = AppSetting(key=PURCHASE_COIN_PERCENT_KEY)
+    setting.value = str(value)
+    setting.updated_at = datetime.now()
+    setting.add()
+    return value
+
+
+async def bot_username() -> str:
+    global _bot_username
+    if not _bot_username:
+        try:
+            me = await get_bot().get_me()
+            _bot_username = me.username or ''
+        except TelegramAPIError:
+            return ''
+    return _bot_username
+
+
+async def personal_referral_link(user_id: int) -> str:
+    username = await bot_username()
+    return f'https://t.me/{username}?start={user_id}' if username else ''
+
+
+async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
+    if not channel.telegram_chat_id:
+        return False
+    member = await get_bot().get_chat_member(channel.telegram_chat_id, user_id)
+    if member.status in {
+        ChatMemberStatus.CREATOR,
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.MEMBER,
+    }:
+        return True
+    return member.status == ChatMemberStatus.RESTRICTED and bool(
+        getattr(member, 'is_member', False),
+    )
+
+
+async def initialize_referral_rewards(user: User) -> list[ReferralReward]:
+    if not user.referrer_id or user.referrer_id == user.id:
+        return []
+    if not await User.get_by_id(user.referrer_id):
+        return []
+
+    rewards = []
+    for channel in await SocialChannel.get_active():
+        reward = await ReferralReward.get_for_user_channel(user.id, channel.id)
+        if reward:
+            rewards.append(reward)
+            continue
+
+        status = 'pending'
+        if channel.supports_automatic_check:
+            try:
+                if await _telegram_member(channel, user.id):
+                    status = 'preexisting'
+            except TelegramAPIError:
+                # Leave the action available: the admin can fix bot rights and retry.
+                pass
+
+        reward = ReferralReward(
+            invited_user_id=user.id,
+            referrer_id=user.referrer_id,
+            social_channel_id=channel.id,
+            status=status,
+        ).add()
+        rewards.append(reward)
+    await session_context.get().flush()
+    return rewards
+
+
+async def approve_referral_reward(reward: ReferralReward, admin_id: int | None = None) -> bool:
+    reward = await ReferralReward.get_by_id_for_update(reward.id) or reward
+    if reward.status == 'approved':
+        return False
+
+    if reward.status == 'preexisting':
+        raise ValueError('Пользователь уже был подписан до участия в программе')
+
+    invited_user = await User.get_by_id(reward.invited_user_id)
+    referrer = await User.get_by_id(reward.referrer_id)
+    channel = await SocialChannel.get_by_id(reward.social_channel_id)
+    if not invited_user or not referrer or not channel:
+        raise ValueError('Реферальные данные больше недоступны')
+
+    if invited_user.id == referrer.id:
+        raise ValueError('Нельзя пригласить самого себя')
+
+    reward_amount = money(
+        reward.reward_amount
+        if reward.verified_at is not None
+        else channel.coin_reward
+    )
+
+    reward.status = 'approved'
+    reward.reward_amount = reward_amount
+    reward.verified_at = datetime.now()
+    reward.reviewed_by_admin_id = admin_id
+    reward.add()
+    await session_context.get().flush()
+
+    if reward_amount:
+        referrer.coin_balance = money(referrer.coin_balance + reward_amount)
+        referrer.updated_at = datetime.now()
+        referrer.add()
+        CoinTransaction(
+            user_id=referrer.id,
+            social_channel_id=channel.id,
+            referral_reward_id=reward.id,
+            amount=reward_amount,
+            balance_after=referrer.coin_balance,
+            reason=(
+                f'Подписка приглашённого {invited_user.id}: '
+                f'{channel.platform} / {channel.account_name}'
+            ),
+        ).add()
+
+    if invited_user.referral_discount_awarded_at is None:
+        referrer.personal_discount_percent = min(
+            MAX_REFERRAL_DISCOUNT,
+            money(referrer.personal_discount_percent + REFERRAL_DISCOUNT_STEP),
+        )
+        referrer.updated_at = datetime.now()
+        referrer.add()
+        invited_user.referral_discount_awarded_at = datetime.now()
+        invited_user.add()
+    await send_message(
+        referrer.id,
+        '<b>Реферальная награда начислена</b> 🎉\n\n'
+        f'{reward_amount} коинов за подтверждённую подписку приглашённого.\n'
+        f'Персональная скидка: {referrer.personal_discount_percent}%.',
+    )
+    return True
+
+
+async def claim_referral_reward(
+    user: User,
+    channel: SocialChannel,
+) -> ReferralReward:
+    if not user.referrer_id:
+        raise HTTPException(status_code=409, detail='Вы пришли без реферальной ссылки')
+    rewards = await initialize_referral_rewards(user)
+    reward = next(
+        (item for item in rewards if item.social_channel_id == channel.id),
+        None,
+    )
+    if not reward:
+        raise HTTPException(status_code=404, detail='Реферальное действие не найдено')
+    if reward.status == 'approved':
+        return reward
+    if reward.status == 'preexisting':
+        raise HTTPException(
+            status_code=409,
+            detail='Подписка существовала до открытия реферального задания',
+        )
+    if reward.status == 'review':
+        return reward
+
+    if channel.supports_automatic_check:
+        try:
+            is_member = await _telegram_member(channel, user.id)
+        except TelegramAPIError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail='Проверка Telegram временно недоступна',
+            ) from exc
+        if not is_member:
+            raise HTTPException(
+                status_code=409,
+                detail='Подписка пока не найдена. Подпишитесь и повторите проверку',
+            )
+        reward.reward_amount = money(channel.coin_reward)
+        reward.verified_at = datetime.now()
+        reward.add()
+        await approve_referral_reward(reward)
+    else:
+        reward.status = 'review'
+        reward.reward_amount = money(channel.coin_reward)
+        reward.verified_at = datetime.now()
+        reward.add()
+    return reward
+
+
+async def reject_referral_reward(reward: ReferralReward, admin_id: int) -> bool:
+    reward = await ReferralReward.get_by_id_for_update(reward.id) or reward
+    if reward.status != 'review':
+        return False
+    reward.status = 'pending'
+    reward.reward_amount = Decimal('0')
+    reward.verified_at = None
+    reward.reviewed_by_admin_id = admin_id
+    reward.add()
+    return True
+
+
+async def award_purchase_coins(user: User, order: Order) -> Decimal:
+    if order.purchase_coins_awarded:
+        return order.purchase_coins_awarded
+    percent = await get_purchase_coin_percent()
+    reward = money(order.paid_total * percent / Decimal('100'))
+    order.purchase_coin_percent = percent
+    order.purchase_coins_awarded = reward
+    order.add()
+    if not reward:
+        return reward
+
+    user.coin_balance = money(user.coin_balance + reward)
+    user.updated_at = datetime.now()
+    user.add()
+    CoinTransaction(
+        user_id=user.id,
+        order_id=order.id,
+        amount=reward,
+        balance_after=user.coin_balance,
+        reason=f'Коины за оплаченный заказ {order.number} ({percent}%)',
+    ).add()
+    return reward

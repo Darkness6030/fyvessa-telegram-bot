@@ -2,15 +2,43 @@
 {% from "_product_card.html" import product_card %}
 {% block title %}Fyvessa — магазин в Telegram{% endblock %}
 {% block content %}
-<section class="mx-auto max-w-6xl px-4 pt-6 sm:pt-10">
-  <div class="hero-grid relative overflow-hidden rounded-[2rem] bg-ink px-6 py-10 text-white sm:px-12 sm:py-16">
-    <div class="relative z-10 max-w-xl">
-      <p class="mb-5 text-xs font-black uppercase tracking-[.28em] text-white/55">Коллекция недели</p>
-      <h1 class="text-4xl font-black leading-[.95] tracking-[-.055em] sm:text-7xl">Нужное.<br><span class="text-coral">Без лишнего.</span></h1>
-      <p class="mt-6 max-w-md text-base leading-relaxed text-white/65">Оригинальные товары, живая проверка наличия и оформление прямо внутри Telegram.</p>
-      <a class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink" href="/catalog">Смотреть каталог →</a>
-    </div>
-    <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
+<section class="mx-auto max-w-6xl px-4 pt-6 sm:pt-10" data-banner-carousel>
+  <div class="banner-slider no-scrollbar flex snap-x snap-mandatory overflow-x-auto rounded-[2rem]" data-banner-slider>
+    {% for banner in banners %}
+    <a class="banner-slide relative block min-h-[20rem] w-full shrink-0 snap-start overflow-hidden rounded-[2rem] bg-ink text-white sm:min-h-[27rem]" href="{{ banner.target_url }}" data-banner-slide>
+      {% if banner.image_url %}
+      <img alt="{{ banner.title }}" class="absolute inset-0 h-full w-full object-cover" src="{{ banner.image_url }}">
+      <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+      <div class="absolute inset-x-0 bottom-0 z-10 p-6 sm:p-10">
+        <h1 class="max-w-3xl text-3xl font-black leading-tight tracking-[-.04em] sm:text-6xl">{{ banner.title }}</h1>
+        <span class="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-black text-ink">Открыть →</span>
+      </div>
+      {% else %}
+      <div class="hero-grid absolute inset-0 px-6 py-10 sm:px-12 sm:py-16">
+        <div class="relative z-10 max-w-xl">
+          <p class="mb-5 text-xs font-black uppercase tracking-[.28em] text-white/55">Коллекция недели</p>
+          <h1 class="text-4xl font-black leading-[.95] tracking-[-.055em] sm:text-7xl">{{ banner.title }}</h1>
+          <p class="mt-6 max-w-md text-base leading-relaxed text-white/65">Оригинальные товары, живая проверка наличия и оформление прямо внутри Telegram.</p>
+          <span class="mt-8 inline-flex rounded-full bg-white px-6 py-3 font-black text-ink">Открыть →</span>
+        </div>
+        <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
+      </div>
+      {% endif %}
+    </a>
+    {% else %}
+    <a class="banner-slide hero-grid relative block min-h-[20rem] w-full shrink-0 snap-start overflow-hidden rounded-[2rem] bg-ink px-6 py-10 text-white sm:min-h-[27rem] sm:px-12 sm:py-16" href="/catalog" data-banner-slide>
+      <div class="relative z-10 max-w-xl"><h1 class="text-4xl font-black sm:text-7xl">Нужное.<br><span class="text-coral">Без лишнего.</span></h1></div>
+      <div class="hero-orb absolute -bottom-20 -right-12 h-72 w-72 rounded-full bg-coral sm:h-96 sm:w-96"></div>
+    </a>
+    {% endfor %}
+  </div>
+  {% if banners|length > 1 %}
+  <div class="mt-3 flex justify-center gap-2" data-banner-dots>
+    {% for banner in banners %}<button aria-label="Карточка {{ loop.index }}" class="banner-dot h-2 w-2 rounded-full bg-black/20" data-banner-dot="{{ loop.index0 }}" type="button"></button>{% endfor %}
+  </div>
+  {% endif %}
+  <div class="mt-5 flex justify-center">
+    <a class="inline-flex rounded-full bg-ink px-7 py-3.5 font-black text-white" href="/catalog">Смотреть каталог →</a>
   </div>
 </section>
 
@@ -34,9 +62,9 @@
     <h2 class="text-2xl font-black tracking-tight sm:text-3xl">{{ section_title }}</h2>
     <a class="text-sm font-bold text-black/50" href="/catalog">Все товары →</a>
   </div>
-  <div class="home-product-feed no-scrollbar grid max-h-[42rem] grid-cols-2 gap-x-3 gap-y-8 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" data-auto-feed>
+  <div class="product-slider no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3">
     {% for product in section_products %}
-    <div>{{ product_card(product, categories_by_id.get(product.category_id)) }}</div>
+    <div class="w-[46%] shrink-0 snap-start sm:w-[31%] lg:w-[19%]">{{ product_card(product, categories_by_id.get(product.category_id)) }}</div>
     {% endfor %}
   </div>
 </section>

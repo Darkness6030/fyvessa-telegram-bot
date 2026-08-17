@@ -8,6 +8,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      TZ: ${PARTNER_PAYOUT_TIMEZONE:-Europe/Moscow}
     depends_on:
       database:
         condition: service_healthy

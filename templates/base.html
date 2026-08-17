@@ -3,10 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport">
-  <meta content="#171714" name="theme-color">
+  <meta content="#f5f1e8" name="theme-color">
   <title>{% block title %}Fyvessa{% endblock %}</title>
   <script>
-    try { document.documentElement.dataset.theme = localStorage.getItem('fyvessa.theme') || 'light'; } catch (_) {}
+    try {
+      const theme = localStorage.getItem('fyvessa.theme') === 'dark' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#121210' : '#f5f1e8';
+    } catch (_) {}
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -24,7 +28,7 @@
         }
     }
   </script>
-  <link href="/static/app.css?v=20260813-5" rel="stylesheet">
+  <link href="/static/app.css?v=20260817-1" rel="stylesheet">
 </head>
 <body class="min-h-screen bg-cream text-ink antialiased">
 <header class="sticky top-0 z-30 border-b border-black/5 bg-cream/90 backdrop-blur-xl">
@@ -49,7 +53,7 @@
   </div>
 </footer>
 <div aria-live="polite" class="toast pointer-events-none fixed bottom-5 left-1/2 z-50 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-soft" id="toast" role="status"></div>
-<script src="/static/app.js?v=20260815-1"></script>
+<script src="/static/app.js?v=20260817-1"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

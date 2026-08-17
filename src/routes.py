@@ -14,20 +14,30 @@ from rewire_sqlmodel import session_context, transaction
 from src.admin_flow import (
     notify_availability_request,
     notify_payment_review,
+    notify_referral_review,
 )
 from src.auth import get_init_data_user
 from src.models import (
     AvailabilityRequest,
+    Banner,
     CartItem,
     Category,
+    CoinTransaction,
     Favorite,
     Order,
     OrderItem,
     Product,
     ProductView,
+    ReferralReward,
+    SocialChannel,
     User,
 )
 from src.orders import (confirmed_cart_availability, create_order_from_cart, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, report_payment, SHIPPING_STATUS_LABELS)
+from src.referrals import (
+    claim_referral_reward,
+    initialize_referral_rewards,
+    personal_referral_link,
+)
 from src.settings import get_settings
 
 plugin = simple_plugin()
@@ -156,6 +166,10 @@ class ReportPaymentResponse(BaseModel):
     status: str
 
 
+class ReferralClaimResponse(BaseModel):
+    status: str
+
+
 class ShopStateResponse(BaseModel):
     favorite_product_ids: list[int]
     cart_quantity: int
@@ -241,6 +255,7 @@ async def home(request: Request) -> HTMLResponse:
         'new_products': [
             product for product in catalog_context['products'] if product.is_new
         ][:12],
+        'banners': await Banner.get_active(),
     }
     return templates.TemplateResponse(request=request, name='home.html', context=context)
 
@@ -343,6 +358,15 @@ async def profile_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name='profile.html',
+        context={'request': request},
+    )
+
+
+@router.get('/referrals', response_class=HTMLResponse)
+async def referrals_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name='referrals.html',
         context={'request': request},
     )
 
@@ -477,6 +501,31 @@ async def profile_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'orders_count': orders_count,
             'support_url': get_settings().support_url,
             'today': date.today().isoformat(),
+        },
+    )
+
+
+@router.get('/api/referrals', response_class=HTMLResponse)
+@transaction(1)
+async def referrals_fragment(request: Request, user: RequestUser) -> HTMLResponse:
+    rewards = await initialize_referral_rewards(user)
+    channels = await SocialChannel.get_active()
+    all_rewards = await ReferralReward.get_all()
+    invited_users = [item for item in await User.get_all() if item.referrer_id == user.id]
+    approved_rewards = [item for item in all_rewards if item.referrer_id == user.id and item.status == 'approved']
+    return templates.TemplateResponse(
+        request=request,
+        name='_referrals_content.html',
+        context={
+            'request': request,
+            'user': user,
+            'referral_link': await personal_referral_link(user.id),
+            'channels': channels,
+            'rewards_by_channel': {item.social_channel_id: item for item in rewards},
+            'invited_count': len(invited_users),
+            'approved_count': len(approved_rewards),
+            'earned_coins': sum((item.reward_amount for item in approved_rewards), Decimal('0')),
+            'coin_transactions': await CoinTransaction.get_recent(user_id=user.id, limit=20),
         },
     )
 
@@ -710,6 +759,26 @@ async def report_order_payment(order_id: int, user: RequestUser) -> ReportPaymen
     return ReportPaymentResponse(ok=has_changed, status=order.status)
 
 
+@router.post(
+    '/api/referrals/{channel_id}/claim',
+    response_model=ReferralClaimResponse,
+)
+@transaction(1)
+async def claim_referral_action(
+    channel_id: int,
+    user: RequestUser,
+) -> ReferralClaimResponse:
+    channel = await SocialChannel.get_by_id(channel_id)
+    if not channel or not channel.is_active:
+        raise HTTPException(status_code=404, detail='Социальная сеть отключена')
+    existing = await ReferralReward.get_for_user_channel(user.id, channel.id)
+    was_in_review = bool(existing and existing.status == 'review')
+    reward = await claim_referral_reward(user, channel)
+    if reward.status == 'review' and not was_in_review:
+        await notify_referral_review(reward, channel, user)
+    return ReferralClaimResponse(status=reward.status)
+
+
 @plugin.setup()
 def include_router(app: FastAPI) -> None:
     app.mount('/static', StaticFiles(directory=Path('static')), name='static')
@@ -717,6 +786,11 @@ def include_router(app: FastAPI) -> None:
         '/catalog/images',
         StaticFiles(directory=Path('assets/catalog'), check_dir=False),
         name='catalog_images',
+    )
+    app.mount(
+        '/banners',
+        StaticFiles(directory=Path('assets/banners'), check_dir=False),
+        name='banners',
     )
 
     app.include_router(router)
