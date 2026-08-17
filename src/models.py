@@ -3,9 +3,9 @@ from decimal import Decimal
 from typing import Optional, Self, Sequence
 
 from rewire import simple_plugin
-from rewire_sqlmodel import SQLModel, session_context
-from sqlalchemy import BigInteger, Index, Text, func
-from sqlmodel import Field, col, select
+from rewire_sqlmodel import session_context, SQLModel
+from sqlalchemy import BigInteger, func, Index, Text
+from sqlmodel import col, Field, select
 
 plugin = simple_plugin()
 

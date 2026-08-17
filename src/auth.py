@@ -1,6 +1,6 @@
 from typing import Annotated, Optional
 
-from aiogram.utils.web_app import WebAppInitData, safe_parse_webapp_init_data
+from aiogram.utils.web_app import safe_parse_webapp_init_data, WebAppInitData
 from fastapi import Depends, HTTPException
 from fastapi.security import APIKeyHeader
 from rewire_sqlmodel import transaction

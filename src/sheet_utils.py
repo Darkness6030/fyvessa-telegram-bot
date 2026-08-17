@@ -269,19 +269,21 @@ def ensure_checkboxes(
         requests = []
         for field in spec.checkbox_fields:
             column_index = column_map[field] - 1
-            requests.append({'setDataValidation': {
-                'range': {
-                    'sheetId': worksheet.id,
-                    'startRowIndex': 1,
-                    'endRowIndex': worksheet.row_count,
-                    'startColumnIndex': column_index,
-                    'endColumnIndex': column_index + 1,
+            requests.append({
+                'setDataValidation': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': worksheet.row_count,
+                        'startColumnIndex': column_index,
+                        'endColumnIndex': column_index + 1,
+                    },
+                    'rule': {
+                        'condition': {'type': ValidationConditionType.boolean.value},
+                        'strict': True,
+                    },
                 },
-                'rule': {
-                    'condition': {'type': ValidationConditionType.boolean.value},
-                    'strict': True,
-                },
-            }})
+            })
         try:
             spreadsheet.batch_update({'requests': requests})
         except APIError as exc:
