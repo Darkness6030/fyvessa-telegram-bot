@@ -42,7 +42,7 @@
   </div>
 </section>
 
-<section class="mx-auto max-w-6xl px-4 pt-10">
+<section class="mx-auto max-w-6xl px-4 pt-8">
   <form action="/catalog" class="flex gap-2 rounded-2xl bg-white p-2 shadow-soft">
     <input aria-label="Поиск" class="min-w-0 flex-1 bg-transparent px-4 py-3 outline-none placeholder:text-black/35" name="q" placeholder="Что ищем?">
     <button class="rounded-xl bg-ink px-5 font-bold text-white">Найти</button>
@@ -57,7 +57,7 @@
 {% set sections = [('Популярное', popular), ('Новинки', new_products)] %}
 {% for section_title, section_products in sections %}
 {% if section_products %}
-<section class="mx-auto max-w-6xl px-4 pt-12">
+<section class="mx-auto max-w-6xl px-4 pt-8">
   <div class="mb-5 flex items-end justify-between">
     <h2 class="text-2xl font-black tracking-tight sm:text-3xl">{{ section_title }}</h2>
     <a class="text-sm font-bold text-black/50" href="/catalog">Все товары →</a>
