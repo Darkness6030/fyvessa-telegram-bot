@@ -120,8 +120,18 @@ def upgrade() -> None:
 
     with op.batch_alter_table('order', schema=None) as batch_op:
         batch_op.add_column(sa.Column('partner_payout_id', sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column('purchase_coin_percent', sa.Numeric(scale=2), nullable=False))
-        batch_op.add_column(sa.Column('purchase_coins_awarded', sa.Numeric(scale=2), nullable=False))
+        batch_op.add_column(sa.Column(
+            'purchase_coin_percent',
+            sa.Numeric(scale=2),
+            nullable=False,
+            server_default=sa.text('0'),
+        ))
+        batch_op.add_column(sa.Column(
+            'purchase_coins_awarded',
+            sa.Numeric(scale=2),
+            nullable=False,
+            server_default=sa.text('0'),
+        ))
         batch_op.create_index(batch_op.f('ix_order_partner_payout_id'), ['partner_payout_id'], unique=False)
         batch_op.create_foreign_key(None, 'partnerpayout', ['partner_payout_id'], ['id'])
 
