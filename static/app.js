@@ -366,7 +366,7 @@ async function copyReferralLink(button) {
         document.execCommand('copy');
         input.remove();
     }
-    if (button) button.textContent = 'Скопировано ✓';
+    if (button) button.textContent = 'Скопировано';
     showToast('Реферальная ссылка скопирована');
 }
 
