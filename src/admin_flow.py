@@ -262,9 +262,54 @@ async def notify_referral_review(
 
 ADMIN_TEXT = (
     '<b>Администрирование Fyvessa</b>\n\n'
-    'Выберите очередь или действие. Товары редактируются в Google Sheets, остальные '
-    'операции выполняются здесь.'
+    'Выберите подраздел. Товары редактируются в Google Sheets, остальные операции '
+    'выполняются здесь.'
 )
+
+ADMIN_GROUPS = {
+    'admin_sales': (
+        '🛒 Продажи',
+        'Заказы, оплаты и запросы покупателей по наличию.',
+        (
+            ('💳 Заказы и оплаты', 'orders'),
+            ('📦 Запросы наличия', 'availability'),
+        ),
+    ),
+    'admin_clients': (
+        '👥 Клиенты и лояльность',
+        'Пользователи, реферальные проверки и настройки коинов.',
+        (
+            ('👥 Пользователи', 'users'),
+            ('🤝 Реферальные проверки', 'referrals'),
+            ('🪙 Настройки коинов', 'coins'),
+        ),
+    ),
+    'admin_partners': (
+        '🤝 Партнёры и выплаты',
+        'Промокоды партнёров, текущие начисления и архив выплат.',
+        (
+            ('🎟 Промокоды', 'promos'),
+            ('💸 Выплаты партнёрам', 'payouts'),
+        ),
+    ),
+    'admin_content': (
+        '🖼 Витрина и каналы',
+        'Рекламные карточки на главной и площадки для подписок.',
+        (
+            ('🖼 Рекламные карточки', 'banners'),
+            ('🌐 Социальные сети', 'socials'),
+        ),
+    ),
+    'admin_system': (
+        '⚙️ Система и отчёты',
+        'Общая сводка, синхронизация Google Sheets и подсказки.',
+        (
+            ('📊 Сводка', 'summary'),
+            ('🔄 Синхронизировать таблицу', 'sync'),
+            ('❓ Команды и подсказки', 'help'),
+        ),
+    ),
+}
 
 SYNC_STARTED_TEXT = (
     '🔄 <b>Синхронизация запущена</b>\n\n'
@@ -283,21 +328,24 @@ async def _edit_message(callback: CallbackQuery, text: str, reply_markup=None):
 
 def _admin_keyboard():
     return inline_keyboard([
-        (text, AdminSectionCallback(section=section))
-        for text, section in (
-            ('📦 Запросы наличия', 'availability'),
-            ('💳 Заказы и оплаты', 'orders'),
-            ('👥 Пользователи', 'users'),
-            ('🎟 Промокоды', 'promos'),
-            ('💸 Выплаты партнёрам', 'payouts'),
-            ('🖼 Рекламные карточки', 'banners'),
-            ('🌐 Социальные сети', 'socials'),
-            ('🤝 Реферальные проверки', 'referrals'),
-            ('🪙 Настройки коинов', 'coins'),
-            ('📊 Сводка', 'summary'),
-            ('🔄 Синхронизировать таблицу', 'sync'),
-            ('❓ Команды и подсказки', 'help'),
-        )
+        (group[0], AdminSectionCallback(section=section))
+        for section, group in ADMIN_GROUPS.items()
+    ])
+
+
+def _admin_group_text(section: str) -> str:
+    title, description, _ = ADMIN_GROUPS[section]
+    return f'<b>{title}</b>\n\n{description}'
+
+
+def _admin_group_keyboard(section: str):
+    _, _, actions = ADMIN_GROUPS[section]
+    return inline_keyboard([
+        *(
+            (text, AdminSectionCallback(section=action))
+            for text, action in actions
+        ),
+        ('🏠 Главное меню', AdminSectionCallback(section='menu')),
     ])
 
 
@@ -497,7 +545,7 @@ def _user_navigation(
 def _help_text() -> str:
     return (
         '<b>Команды администратора</b>\n\n'
-        '/admin — панель с очередями и сводкой\n'
+        '/admin — панель с административными подразделами\n'
         '/user &lt;username/Telegram ID&gt; — карточка пользователя\n'
         '/discount &lt;username/ID&gt; &lt;0–100&gt; — персональная скидка\n'
         '/availability &lt;ID&gt; &lt;есть|нет|уточняется&gt; '
@@ -1166,6 +1214,12 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
     await state.clear()
     if callback_data.section == 'menu':
         await _edit_message(callback, ADMIN_TEXT, _admin_keyboard())
+    elif callback_data.section in ADMIN_GROUPS:
+        await _edit_message(
+            callback,
+            _admin_group_text(callback_data.section),
+            _admin_group_keyboard(callback_data.section),
+        )
     elif callback_data.section == 'sync':
         await callback.answer('Синхронизация запущена')
         await _edit_message(callback, await _sync_text(), _back_keyboard())
