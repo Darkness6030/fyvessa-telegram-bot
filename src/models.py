@@ -517,6 +517,7 @@ class SocialChannel(SQLModel, table=True):
     account_name: str
     url: str
     coin_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    invitee_coin_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
     telegram_chat_id: Optional[str] = None
     is_active: bool = Field(default=True, index=True)
 
@@ -567,6 +568,7 @@ class ReferralReward(SQLModel, table=True):
     social_channel_id: int = Field(foreign_key='socialchannel.id', index=True)
     status: str = Field(default='pending', index=True)
     reward_amount: Decimal = Field(default=Decimal('0'), decimal_places=2)
+    invitee_reward_amount: Decimal = Field(default=Decimal('0'), decimal_places=2)
     verified_at: Optional[datetime] = None
     reviewed_by_admin_id: Optional[int] = Field(default=None, sa_type=BigInteger)
 

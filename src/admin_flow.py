@@ -245,7 +245,8 @@ async def notify_referral_review(
         f'Площадка: {html.escape(channel.platform)} / '
         f'{html.escape(channel.account_name)}\n'
         f'Ссылка: {html.escape(channel.url)}\n'
-        f'Награда пригласившему: {channel.coin_reward} коинов',
+        f'Награда пригласившему: {reward.reward_amount} коинов\n'
+        f'Награда подписавшемуся: {reward.invitee_reward_amount} коинов',
         reply_markup=inline_keyboard([
             (
                 '✅ Подтвердить',
@@ -1052,7 +1053,8 @@ def _social_text(channel: SocialChannel) -> str:
         f'Площадка: <b>{html.escape(channel.platform)}</b>\n'
         f'Аккаунт: <b>{html.escape(channel.account_name)}</b>\n'
         f'Ссылка: {html.escape(channel.url)}\n'
-        f'Награда: <b>{channel.coin_reward} коинов</b>\n'
+        f'Награда пригласившему: <b>{channel.coin_reward} коинов</b>\n'
+        f'Награда подписавшемуся: <b>{channel.invitee_coin_reward} коинов</b>\n'
         f'Проверка: <b>{check_mode}</b>\n'
         f'Telegram chat ID: <code>{html.escape(channel.telegram_chat_id or "—")}</code>\n'
         f'Статус: <b>{"включена" if channel.is_active else "отключена"}</b>'
@@ -1102,7 +1104,8 @@ async def _referral_review_text(reward: ReferralReward) -> str:
         f'({html.escape(referrer.username or "без username") if referrer else "удалён"})\n'
         f'Площадка: <b>{html.escape(channel.platform) if channel else "удалена"}</b> / '
         f'{html.escape(channel.account_name) if channel else "—"}\n'
-        f'Награда: <b>{channel.coin_reward if channel else 0} коинов</b>\n'
+        f'Награда пригласившему: <b>{reward.reward_amount} коинов</b>\n'
+        f'Награда подписавшемуся: <b>{reward.invitee_reward_amount} коинов</b>\n'
         f'Статус: <b>{reward.status}</b>'
     )
 
@@ -1201,7 +1204,9 @@ async def _resolve_availability(
             user.id,
             f'<b>Ответ по наличию</b>\n\n'
             f'{html.escape(product.name if product else 'Товар')}: '
-            f'{AVAILABILITY_LABELS[status]}.{suffix_text}{note_text}',
+            f'{AVAILABILITY_LABELS[status]}.{suffix_text}'
+            f'{" Подтверждение действует 1 час." if status == "available" else ""}'
+            f'{note_text}',
             reply_markup=_cart_keyboard() if status == 'available' else None,
         )
 
@@ -1888,7 +1893,8 @@ def _social_prompt(channel: SocialChannel | None = None) -> str:
     return (
         f'<b>{"Изменить" if channel else "Новая"} площадка</b>\n\n'
         'Отправьте одной строкой:\n'
-        '<code>Telegram | Название канала | https://t.me/channel | 7 | @channel</code>\n\n'
+        '<code>Telegram | Название канала | https://t.me/channel | 7 | 3 | @channel</code>\n\n'
+        'Первое число — награда пригласившему, второе — самому подписавшемуся.\n\n'
         'Для Instagram, TikTok, YouTube и других площадок вместо последнего '
         'поля укажите <code>-</code> — такие подписки подтверждаются администратором. '
         'Для Telegram bot должен быть администратором канала.'
@@ -1934,17 +1940,32 @@ async def social_action(
 @transaction(1)
 async def social_form(message: Message, state: FSMContext):
     data = await state.get_data()
+    channel = await SocialChannel.get_by_id(data.get('channel_id', 0))
     parts = [part.strip() for part in (message.text or '').split('|')]
     try:
-        if len(parts) != 5:
-            raise ValueError('Нужно пять полей через |')
-        platform, account_name, url, reward_text, telegram_chat_id = parts
+        if len(parts) not in {5, 6}:
+            raise ValueError('Нужно шесть полей через |')
+        if len(parts) == 5:
+            platform, account_name, url, reward_text, telegram_chat_id = parts
+            invitee_reward_text = str(channel.invitee_coin_reward if channel else 0)
+        else:
+            (
+                platform,
+                account_name,
+                url,
+                reward_text,
+                invitee_reward_text,
+                telegram_chat_id,
+            ) = parts
         if not platform or not account_name:
             raise ValueError('Площадка и название аккаунта обязательны')
         url = _valid_url(url)
         coin_reward = Decimal(reward_text.replace(',', '.'))
+        invitee_coin_reward = Decimal(invitee_reward_text.replace(',', '.'))
         if not Decimal('0') <= coin_reward <= Decimal('1000000'):
-            raise ValueError('Награда должна быть от 0 до 1 000 000')
+            raise ValueError('Награда пригласившему должна быть от 0 до 1 000 000')
+        if not Decimal('0') <= invitee_coin_reward <= Decimal('1000000'):
+            raise ValueError('Награда подписавшемуся должна быть от 0 до 1 000 000')
         telegram_chat_id = None if telegram_chat_id == '-' else telegram_chat_id
         if platform.casefold() == 'telegram' and not telegram_chat_id:
             raise ValueError('Для автоматической проверки Telegram укажите @channel или chat ID')
@@ -1954,7 +1975,6 @@ async def social_form(message: Message, state: FSMContext):
             reply_markup=_back_keyboard('socials', data.get('page', 0)),
         )
 
-    channel = await SocialChannel.get_by_id(data.get('channel_id', 0))
     if not channel:
         channel = SocialChannel(
             platform=platform,
@@ -1965,6 +1985,7 @@ async def social_form(message: Message, state: FSMContext):
     channel.account_name = account_name
     channel.url = url
     channel.coin_reward = coin_reward
+    channel.invitee_coin_reward = invitee_coin_reward
     channel.telegram_chat_id = telegram_chat_id
     channel.updated_at = datetime.now()
     channel.add()
@@ -1990,10 +2011,6 @@ async def referral_review_action(
     try:
         if callback_data.action == 'approve':
             changed = await approve_referral_reward(reward, callback.from_user.id)
-            await bot.send_message(
-                reward.invited_user_id,
-                'Подписка подтверждена. Награда начислена пригласившему вас пользователю.',
-            )
             result = 'Подтверждено' if changed else 'Уже подтверждено'
         elif callback_data.action == 'reject':
             await reject_referral_reward(reward, callback.from_user.id)

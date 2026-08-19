@@ -15,7 +15,7 @@
 
   <section class="rounded-[2rem] bg-white p-5 shadow-soft sm:p-7">
     <h2 class="text-xl font-black">Площадки и награды</h2>
-    <p class="mt-1 text-sm text-black/45">Друг открывает вашу ссылку, подписывается и подтверждает действие.</p>
+    <p class="mt-1 text-sm text-black/45">Друг открывает вашу ссылку, подписывается и подтверждает действие. Настроенные награды получают и пригласивший, и подписавшийся.</p>
     {% if channels %}
     <div class="mt-5 space-y-3">
       {% for channel in channels %}
@@ -23,12 +23,15 @@
       <article class="rounded-2xl border border-black/10 p-4">
         <div class="flex items-start justify-between gap-4">
           <div><p class="text-xs font-black uppercase tracking-wider text-coral">{{ channel.platform }}</p><h3 class="mt-1 font-black">{{ channel.account_name }}</h3></div>
-          <strong class="whitespace-nowrap rounded-full bg-sage/20 px-3 py-1 text-sm">+{{ channel.coin_reward }} коинов</strong>
+          <div class="space-y-1 text-right text-xs font-bold">
+            <p class="whitespace-nowrap rounded-full bg-sage/20 px-3 py-1">За друга: +{{ channel.coin_reward }}</p>
+            <p class="whitespace-nowrap rounded-full bg-coral/10 px-3 py-1 text-coral">За подписку: +{{ channel.invitee_coin_reward }}</p>
+          </div>
         </div>
         <a class="mt-4 block rounded-xl bg-ink px-4 py-3 text-center font-bold text-white" data-no-soft-nav href="{{ channel.url }}" target="_blank">Открыть площадку ↗</a>
         {% if user.referrer_id and reward %}
           {% if reward.status == 'approved' %}
-          <p class="mt-3 text-center text-sm font-bold text-sage">Подписка подтверждена ✓</p>
+          <p class="mt-3 text-center text-sm font-bold text-sage">Подписка подтверждена ✓ · Вам начислено {{ reward.invitee_reward_amount }} коинов</p>
           {% elif reward.status == 'preexisting' %}
           <p class="mt-3 text-center text-sm text-black/45">Подписка была оформлена раньше — повторная награда не начисляется.</p>
           {% elif reward.status == 'review' %}

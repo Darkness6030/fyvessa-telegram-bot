@@ -20,19 +20,15 @@
 </section>
 
 {% for featured in featured_categories %}
-{% for section_title, section_products in [('Популярное', featured.popular), ('Новинки', featured.new_products)] %}
-{% if section_products %}
 <section class="mx-auto max-w-6xl px-4 pt-8">
   <div class="mb-5 flex items-end justify-between gap-4">
-    <div><p class="text-xs font-bold uppercase tracking-wider text-coral">{{ featured.category.name }}</p><h2 class="mt-1 text-2xl font-black">{{ section_title }}</h2></div>
+    <div><p class="text-xs font-bold uppercase tracking-wider text-coral">{{ featured.category.name }}</p><h2 class="mt-1 text-2xl font-black">Новинки</h2></div>
     <a class="text-sm font-bold text-black/50" href="/catalog?category_id={{ featured.category.id }}">Категория →</a>
   </div>
   <div class="product-slider no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3">
-    {% for product in section_products %}<div class="w-[46%] shrink-0 snap-start sm:w-[31%] lg:w-[19%]">{{ product_card(product, featured.category) }}</div>{% endfor %}
+    {% for product in featured.new_products %}<div class="w-[46%] shrink-0 snap-start sm:w-[31%] lg:w-[19%]">{{ product_card(product, featured.category) }}</div>{% endfor %}
   </div>
 </section>
-{% endif %}
-{% endfor %}
 {% endfor %}
 
 <section class="mx-auto max-w-6xl px-4 pt-8">

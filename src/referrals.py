@@ -1,3 +1,4 @@
+import html
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -128,22 +129,28 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
     if invited_user.id == referrer.id:
         raise ValueError('Нельзя пригласить самого себя')
 
+    rewards_were_snapshotted = reward.verified_at is not None
     reward_amount = money(
-        reward.reward_amount
-        if reward.verified_at is not None
-        else channel.coin_reward
+        reward.reward_amount if rewards_were_snapshotted else channel.coin_reward
+    )
+    invitee_reward_amount = money(
+        reward.invitee_reward_amount
+        if rewards_were_snapshotted
+        else channel.invitee_coin_reward
     )
 
     reward.status = 'approved'
     reward.reward_amount = reward_amount
-    reward.verified_at = datetime.now()
+    reward.invitee_reward_amount = invitee_reward_amount
+    current_time = datetime.now()
+    reward.verified_at = current_time
     reward.reviewed_by_admin_id = admin_id
     reward.add()
     await session_context.get().flush()
 
     if reward_amount:
         referrer.coin_balance = money(referrer.coin_balance + reward_amount)
-        referrer.updated_at = datetime.now()
+        referrer.updated_at = current_time
         referrer.add()
         CoinTransaction(
             user_id=referrer.id,
@@ -157,20 +164,44 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
             ),
         ).add()
 
+    if invitee_reward_amount:
+        invited_user.coin_balance = money(
+            invited_user.coin_balance + invitee_reward_amount
+        )
+        invited_user.updated_at = current_time
+        invited_user.add()
+        CoinTransaction(
+            user_id=invited_user.id,
+            social_channel_id=channel.id,
+            referral_reward_id=reward.id,
+            amount=invitee_reward_amount,
+            balance_after=invited_user.coin_balance,
+            reason=(
+                f'Награда за подписку: '
+                f'{channel.platform} / {channel.account_name}'
+            ),
+        ).add()
+
     if invited_user.referral_discount_awarded_at is None:
         referrer.personal_discount_percent = min(
             MAX_REFERRAL_DISCOUNT,
             money(referrer.personal_discount_percent + REFERRAL_DISCOUNT_STEP),
         )
-        referrer.updated_at = datetime.now()
+        referrer.updated_at = current_time
         referrer.add()
-        invited_user.referral_discount_awarded_at = datetime.now()
+        invited_user.referral_discount_awarded_at = current_time
         invited_user.add()
     await send_message(
         referrer.id,
         '<b>Реферальная награда начислена</b> 🎉\n\n'
         f'{reward_amount} коинов за подтверждённую подписку приглашённого.\n'
         f'Персональная скидка: {referrer.personal_discount_percent}%.',
+    )
+    await send_message(
+        invited_user.id,
+        '<b>Подписка подтверждена</b> 🎉\n\n'
+        f'{html.escape(channel.platform)} / {html.escape(channel.account_name)}.\n'
+        f'Вам начислено: {invitee_reward_amount} коинов.',
     )
     return True
 
@@ -212,12 +243,14 @@ async def claim_referral_reward(
                 detail='Подписка пока не найдена. Подпишитесь и повторите проверку',
             )
         reward.reward_amount = money(channel.coin_reward)
+        reward.invitee_reward_amount = money(channel.invitee_coin_reward)
         reward.verified_at = datetime.now()
         reward.add()
         await approve_referral_reward(reward)
     else:
         reward.status = 'review'
         reward.reward_amount = money(channel.coin_reward)
+        reward.invitee_reward_amount = money(channel.invitee_coin_reward)
         reward.verified_at = datetime.now()
         reward.add()
     return reward
@@ -229,6 +262,7 @@ async def reject_referral_reward(reward: ReferralReward, admin_id: int) -> bool:
         return False
     reward.status = 'pending'
     reward.reward_amount = Decimal('0')
+    reward.invitee_reward_amount = Decimal('0')
     reward.verified_at = None
     reward.reviewed_by_admin_id = admin_id
     reward.add()

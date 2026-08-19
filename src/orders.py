@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
@@ -42,11 +42,35 @@ DELIVERY_METHOD_LABELS = {
     'ozon': 'Ozon',
 }
 
+AVAILABILITY_CONFIRMATION_TTL = timedelta(hours=1)
 
-async def confirmed_cart_availability(user: User, cart_items: Optional[list[CartItem]]) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
+
+def availability_confirmation_expires_at(
+    availability: AvailabilityRequest,
+) -> Optional[datetime]:
+    if availability.status != 'available' or availability.resolved_at is None:
+        return None
+    return availability.resolved_at + AVAILABILITY_CONFIRMATION_TTL
+
+
+def is_availability_confirmation_active(
+    availability: AvailabilityRequest,
+    now: Optional[datetime] = None,
+) -> bool:
+    expires_at = availability_confirmation_expires_at(availability)
+    return expires_at is not None and expires_at > (now or datetime.now())
+
+
+async def confirmed_cart_availability(
+    user: User,
+    cart_items: Optional[list[CartItem]],
+    now: Optional[datetime] = None,
+) -> tuple[dict[int, AvailabilityRequest], list[CartItem]]:
     cart_items = cart_items or await CartItem.get_for_user(user.id)
     if not cart_items:
         return {}, []
+
+    current_time = now or datetime.now()
 
     requests = await AvailabilityRequest.get_latest_for_products(
         user.id, [cart_item.product_id for cart_item in cart_items]
@@ -64,6 +88,7 @@ async def confirmed_cart_availability(user: User, cart_items: Optional[list[Cart
         if (
             availability
             and availability.status == 'available'
+            and is_availability_confirmation_active(availability, current_time)
             and (availability.requested_quantity or 0) >= cart_item.quantity
             and (availability.available_quantity or 0) >= cart_item.quantity
         ):

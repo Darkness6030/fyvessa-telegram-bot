@@ -26,7 +26,20 @@ html[data-theme="dark"] .theme-icon-to-light { display: inline; }
 }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
 .product-slider { scroll-behavior: smooth; }
-.banner-slider { scroll-behavior: smooth; overscroll-behavior-x: contain; }
+.banner-slider {
+    background: var(--tg-bg);
+    isolation: isolate;
+    scroll-behavior: smooth;
+    overscroll-behavior-x: contain;
+}
+.banner-slide {
+    background: var(--tg-bg);
+    clip-path: inset(0 round 1rem);
+}
+.banner-image {
+    background: var(--tg-bg);
+    border-radius: inherit;
+}
 .banner-dot { transition: width .25s var(--ease-out), background-color .25s ease; }
 .banner-dot.is-active { background: #171714; width: 1.75rem; }
 .product-placeholder {

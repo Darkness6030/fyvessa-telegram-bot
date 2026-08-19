@@ -32,7 +32,15 @@ from src.models import (
     SocialChannel,
     User,
 )
-from src.orders import (confirmed_cart_availability, create_order_from_cart, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, report_payment, SHIPPING_STATUS_LABELS)
+from src.orders import (
+    availability_confirmation_expires_at,
+    confirmed_cart_availability,
+    create_order_from_cart,
+    DELIVERY_METHOD_LABELS,
+    ORDER_STATUS_LABELS,
+    report_payment,
+    SHIPPING_STATUS_LABELS,
+)
 from src.referrals import (
     claim_referral_reward,
     initialize_referral_rewards,
@@ -168,6 +176,7 @@ class ReportPaymentResponse(BaseModel):
 
 class ReferralClaimResponse(BaseModel):
     status: str
+    invitee_reward_amount: Decimal = Decimal('0')
 
 
 class ShopStateResponse(BaseModel):
@@ -215,12 +224,10 @@ async def _catalog_context(
         category_products = [
             product for product in products if product.category_id == category.id
         ]
-        popular = [product for product in category_products if product.is_popular]
         new_products = [product for product in category_products if product.is_new]
-        if popular or new_products:
+        if new_products:
             featured_categories.append({
                 'category': category,
-                'popular': popular,
                 'new_products': new_products,
             })
     return {
@@ -454,7 +461,12 @@ async def cart_fragment(request: Request, user: RequestUser) -> HTMLResponse:
         if cart_item.product_id in products_by_id
     )
 
-    confirmations, missing_items = await confirmed_cart_availability(user, cart_items)
+    current_time = datetime.now()
+    confirmations, missing_items = await confirmed_cart_availability(
+        user,
+        cart_items,
+        now=current_time,
+    )
     availability_requests = await AvailabilityRequest.get_latest_for_products(
         user.id, [cart_item.product_id for cart_item in cart_items],
     )
@@ -462,6 +474,28 @@ async def cart_fragment(request: Request, user: RequestUser) -> HTMLResponse:
     latest_availability_by_product: dict[int, AvailabilityRequest] = {}
     for availability in availability_requests:
         latest_availability_by_product.setdefault(availability.product_id, availability)
+
+    confirmation_expirations = [
+        expiration
+        for availability in confirmations.values()
+        if (expiration := availability_confirmation_expires_at(availability)) is not None
+    ]
+    confirmation_refresh_ms = None
+    if confirmation_expirations:
+        confirmation_refresh_ms = max(
+            1,
+            int((min(confirmation_expirations) - current_time).total_seconds() * 1000) + 100,
+        )
+
+    expired_confirmation_product_ids = {
+        product_id
+        for product_id, availability in latest_availability_by_product.items()
+        if availability.status == 'available'
+        and (
+            (expiration := availability_confirmation_expires_at(availability)) is None
+            or expiration <= current_time
+        )
+    }
 
     return templates.TemplateResponse(
         request=request,
@@ -475,6 +509,8 @@ async def cart_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'confirmed_product_ids': set(confirmations),
             'missing_confirmation_count': len(missing_items),
             'availability_by_product': latest_availability_by_product,
+            'expired_confirmation_product_ids': expired_confirmation_product_ids,
+            'confirmation_refresh_ms': confirmation_refresh_ms,
             'has_pending_requests': any(
                 availability.status == 'pending'
                 for product_id, availability in latest_availability_by_product.items()
@@ -513,6 +549,11 @@ async def referrals_fragment(request: Request, user: RequestUser) -> HTMLRespons
     all_rewards = await ReferralReward.get_all()
     invited_users = [item for item in await User.get_all() if item.referrer_id == user.id]
     approved_rewards = [item for item in all_rewards if item.referrer_id == user.id and item.status == 'approved']
+    approved_invitee_rewards = [
+        item
+        for item in all_rewards
+        if item.invited_user_id == user.id and item.status == 'approved'
+    ]
     return templates.TemplateResponse(
         request=request,
         name='_referrals_content.html',
@@ -524,7 +565,13 @@ async def referrals_fragment(request: Request, user: RequestUser) -> HTMLRespons
             'rewards_by_channel': {item.social_channel_id: item for item in rewards},
             'invited_count': len(invited_users),
             'approved_count': len(approved_rewards),
-            'earned_coins': sum((item.reward_amount for item in approved_rewards), Decimal('0')),
+            'earned_coins': (
+                sum((item.reward_amount for item in approved_rewards), Decimal('0'))
+                + sum(
+                    (item.invitee_reward_amount for item in approved_invitee_rewards),
+                    Decimal('0'),
+                )
+            ),
             'coin_transactions': await CoinTransaction.get_recent(user_id=user.id, limit=20),
         },
     )
@@ -776,7 +823,14 @@ async def claim_referral_action(
     reward = await claim_referral_reward(user, channel)
     if reward.status == 'review' and not was_in_review:
         await notify_referral_review(reward, channel, user)
-    return ReferralClaimResponse(status=reward.status)
+    return ReferralClaimResponse(
+        status=reward.status,
+        invitee_reward_amount=(
+            reward.invitee_reward_amount
+            if reward.status == 'approved'
+            else Decimal('0')
+        ),
+    )
 
 
 @plugin.setup()

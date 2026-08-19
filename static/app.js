@@ -390,7 +390,14 @@ async function claimReferralReward(channelId, button) {
         const result = await api(`/api/referrals/${channelId}/claim`, {method: 'POST'});
         const container = document.querySelector('[data-auth-fragment="/api/referrals"]');
         if (container) await loadProtectedFragment(container, {quiet: true});
-        showToast(result.status === 'approved' ? 'Подписка подтверждена' : 'Отправлено на проверку');
+        if (result.status === 'approved') {
+            const reward = Number(result.invitee_reward_amount || 0);
+            showToast(reward > 0
+                ? `Подписка подтверждена · +${reward} коинов`
+                : 'Подписка подтверждена');
+        } else {
+            showToast('Отправлено на проверку');
+        }
     } catch (error) {
         showToast(error.message);
         button.disabled = false;
@@ -405,10 +412,17 @@ async function refreshCart(options = {}) {
 
 function scheduleCartPolling(container) {
     clearTimeout(window.__fyvessaCartPollTimer);
-    if (!container.querySelector('[data-cart-pending="true"]')) return;
+    const cartContent = container.querySelector('[data-cart-pending]');
+    if (!cartContent) return;
+    const isPending = cartContent.dataset.cartPending === 'true';
+    const confirmationRefreshMs = Number(cartContent.dataset.cartConfirmationRefreshMs);
+    if (!isPending && (!Number.isFinite(confirmationRefreshMs) || confirmationRefreshMs <= 0)) return;
+    const refreshDelay = isPending
+        ? 5000
+        : Math.min(confirmationRefreshMs, 2147483000);
     window.__fyvessaCartPollTimer = setTimeout(async () => {
         if (container.isConnected) await loadProtectedFragment(container, {quiet: true});
-    }, 5000);
+    }, Math.max(250, refreshDelay));
 }
 
 function animateFavorite(button, isFavorite) {

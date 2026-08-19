@@ -1,6 +1,6 @@
 {% from "_product_placeholder.html" import product_placeholder %}
 {% if items %}
-<div class="space-y-3" data-cart-pending="{{ 'true' if has_pending_requests else 'false' }}">
+<div class="space-y-3" data-cart-confirmation-refresh-ms="{{ confirmation_refresh_ms if confirmation_refresh_ms is not none else '' }}" data-cart-pending="{{ 'true' if has_pending_requests else 'false' }}">
   {% for item in items %}{% set product = products_by_id.get(item.product_id) %}{% if product %}
   {% set availability = availability_by_product.get(product.id) %}
   <article class="flex items-center gap-3 rounded-[1.5rem] bg-white p-3 shadow-soft" data-cart-item data-product-id="{{ product.id }}" data-unit-price="{{ product.current_price }}">
@@ -22,9 +22,10 @@
         <button class="rounded-full bg-coral px-3 py-1.5 font-bold text-white" onclick="requestCartAvailability({{ product.id }}, {{ item.quantity }}, this)" type="button">
           {{ 'Запросить повторно' if availability else 'Подтвердить наличие' }}
         </button>
+        {% if product.id in expired_confirmation_product_ids %}<span class="font-bold text-black/45">Срок подтверждения истёк</span>{% endif %}
         {% if availability and availability.status == 'unavailable' %}<span class="font-bold text-coral">✕ Нет в наличии</span>{% endif %}
         {% if availability and availability.status == 'on_request' %}<span class="font-bold text-black/45">⏳ Наличие уточняется</span>{% endif %}
-        {% if availability and availability.status == 'available' %}<span class="font-bold text-coral">Подтверждено только {{ availability.available_quantity or 0 }} шт.</span>{% endif %}
+        {% if availability and availability.status == 'available' and product.id not in expired_confirmation_product_ids %}<span class="font-bold text-coral">Подтверждено только {{ availability.available_quantity or 0 }} шт.</span>{% endif %}
         {% endif %}
       </div>
     </div>

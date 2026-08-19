@@ -7,7 +7,7 @@
     {% for banner in banners %}
     <a aria-label="Рекламная карточка" class="banner-slide relative block w-full shrink-0 snap-start overflow-hidden rounded-[1rem]" href="{{ banner.target_url }}" data-banner-slide>
       {% if banner.image_url %}
-      <img alt="" class="block h-auto w-full" src="{{ banner.image_url }}">
+      <img alt="" class="banner-image block h-auto w-full" src="{{ banner.image_url }}">
       {% else %}
       <div class="hero-grid relative min-h-[20rem] px-6 py-10 text-white sm:min-h-[27rem] sm:px-12 sm:py-16">
         <div class="relative z-10 max-w-xl">
