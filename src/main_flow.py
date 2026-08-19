@@ -67,7 +67,7 @@ def create_main_keyboard(
 ) -> InlineKeyboardMarkup:
     settings = get_settings()
     buttons = [
-        ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
+        ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}')),
     ]
 
     seen_urls = set()
