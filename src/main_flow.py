@@ -91,6 +91,7 @@ def create_main_keyboard(
         ('💬 Поддержка', settings.support_url),
         ('📣 Канал', settings.channel_url),
     ])
+
     return inline_keyboard(buttons)
 
 

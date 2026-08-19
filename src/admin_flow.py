@@ -163,6 +163,16 @@ ORDER_COMMAND_ACTIONS = {
     'доставлен': 'delivered',
 }
 
+BANNER_DIRECTORY = Path('assets/banners')
+BANNER_IMAGE_SUFFIXES = {
+    'image/avif': '.avif',
+    'image/gif': '.gif',
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+}
+
 
 def _cart_keyboard():
     return inline_keyboard([
@@ -1776,12 +1786,73 @@ def _banner_prompt(banner: Banner | None = None) -> str:
         f'<b>{"Изменить" if banner else "Новая"} рекламная карточка</b>\n\n'
         'Вариант с URL — отправьте:\n'
         '<code>Название | https://image.jpg | /catalog | 10</code>\n\n'
-        'Вариант с фото — прикрепите фото и добавьте подпись:\n'
+        'Вариант с фото или файлом-изображением — прикрепите его и добавьте подпись:\n'
         '<code>Название | /catalog | 10</code>\n\n'
+        'Поддерживаются JPEG, PNG, WebP, GIF и AVIF.\n\n'
         'Последнее число задаёт порядок. Ссылка перехода может быть внутренней '
         '(/catalog) или внешней (https://...).'
         f'{current}'
     )
+
+
+def _banner_upload(message: Message) -> tuple[str, str] | None:
+    if message.photo:
+        return message.photo[-1].file_id, '.jpg'
+    if not message.document:
+        return None
+
+    suffix = BANNER_IMAGE_SUFFIXES.get((message.document.mime_type or '').casefold())
+    if not suffix:
+        raise ValueError('Файл должен быть изображением JPEG, PNG, WebP, GIF или AVIF')
+    return message.document.file_id, suffix
+
+
+def _banner_parts(value: str | None, count: int, hint: str) -> list[str]:
+    parts = [part.strip() for part in (value or '').split('|')]
+    if len(parts) != count:
+        raise ValueError(hint)
+    return parts
+
+
+def _parse_banner_details(
+    message: Message,
+    banner: Banner | None,
+) -> tuple[str, str, str, int, tuple[str, str] | None]:
+    upload = _banner_upload(message)
+    if upload:
+        title, target_url, position_text = _banner_parts(
+            message.caption,
+            3,
+            'Для изображения нужна подпись: Название | Ссылка | Порядок',
+        )
+        image_url = ''
+    else:
+        title, image_url, target_url, position_text = _banner_parts(
+            message.text,
+            4,
+            'Формат: Название | URL изображения | Ссылка | Порядок',
+        )
+        if image_url == '-' and banner:
+            image_url = banner.image_url
+        elif image_url:
+            image_url = _valid_url(image_url, allow_local=True)
+
+    if not title:
+        raise ValueError('Название не может быть пустым')
+    return (
+        title,
+        image_url,
+        _valid_url(target_url, allow_local=True),
+        int(position_text),
+        upload,
+    )
+
+
+async def _save_banner_upload(file_id: str, suffix: str) -> str:
+    BANNER_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    destination = BANNER_DIRECTORY / f'{uuid4().hex}{suffix}'
+    await bot.get_bot().download(file_id, destination=destination)
+    return f'/banners/{destination.name}'
 
 
 @router.callback_query(BannerActionCallback.filter())
@@ -1838,33 +1909,12 @@ async def banner_form(message: Message, state: FSMContext):
     data = await state.get_data()
     banner = await Banner.get_by_id(data.get('banner_id', 0))
     try:
-        if message.photo:
-            parts = [part.strip() for part in (message.caption or '').split('|')]
-            if len(parts) != 3:
-                raise ValueError('Для фото нужна подпись: Название | Ссылка | Порядок')
-            title, target_url, position_text = parts
-            if not title:
-                raise ValueError('Название не может быть пустым')
-            target_url = _valid_url(target_url, allow_local=True)
-            position = int(position_text)
-            directory = Path('assets/banners')
-            directory.mkdir(parents=True, exist_ok=True)
-            destination = directory / f'{uuid4().hex}.jpg'
-            await bot.get_bot().download(message.photo[-1].file_id, destination=destination)
-            image_url = f'/banners/{destination.name}'
-        else:
-            parts = [part.strip() for part in (message.text or '').split('|')]
-            if len(parts) != 4:
-                raise ValueError('Формат: Название | URL изображения | Ссылка | Порядок')
-            title, image_url, target_url, position_text = parts
-            if not title:
-                raise ValueError('Название не может быть пустым')
-            if image_url == '-' and banner:
-                image_url = banner.image_url
-            elif image_url:
-                image_url = _valid_url(image_url, allow_local=True)
-            target_url = _valid_url(target_url, allow_local=True)
-            position = int(position_text)
+        title, image_url, target_url, position, upload = _parse_banner_details(
+            message,
+            banner,
+        )
+        if upload:
+            image_url = await _save_banner_upload(*upload)
     except (ValueError, TypeError) as exc:
         return await message.answer(
             f'Не удалось сохранить: {html.escape(str(exc))}\n\n{_banner_prompt(banner)}',
