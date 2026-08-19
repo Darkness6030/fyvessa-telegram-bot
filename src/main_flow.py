@@ -72,12 +72,13 @@ def create_main_keyboard(
 
     seen_urls = set()
     for channel in referral_channels or []:
-        url = channel.url.strip()
-        if not url or url in seen_urls:
+        channel_url = channel.url.strip()
+        if not channel_url or channel_url in seen_urls:
             continue
-        seen_urls.add(url)
+
+        seen_urls.add(channel_url)
         account_name = channel.account_name.strip() or channel.platform.strip()
-        buttons.append((f'🔗 {account_name[:48]}', url))
+        buttons.append((f'🔗 {account_name[:48]}', channel_url))
 
     if referral_channels:
         buttons.append((
