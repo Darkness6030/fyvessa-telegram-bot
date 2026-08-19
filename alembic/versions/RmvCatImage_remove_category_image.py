@@ -2,7 +2,6 @@ from alembic import op
 from sqlalchemy import Column
 from sqlmodel.sql.sqltypes import AutoString
 
-
 revision = 'RmvCatImage'
 down_revision = 'GlTRYSMPcQdm6Ti52WfR0Lg'
 branch_labels = None

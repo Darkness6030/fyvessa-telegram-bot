@@ -1,20 +1,7 @@
 from alembic import op
-from sqlalchemy.sql.elements import quoted_name
-from sqlalchemy.sql.schema import Table
-from sqlalchemy.sql.schema import MetaData
-from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql.sqltypes import Integer
+from sqlalchemy.sql.schema import Column, ForeignKeyConstraint, Index, MetaData, PrimaryKeyConstraint, Table
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Date, DateTime, Integer, Numeric, Text
 from sqlmodel.sql.sqltypes import AutoString
-from sqlalchemy.sql.sqltypes import Boolean
-from sqlalchemy.sql.sqltypes import DateTime
-from sqlalchemy.sql.schema import PrimaryKeyConstraint
-from sqlalchemy.sql.schema import Index
-from sqlalchemy.sql.sqltypes import Numeric
-from sqlalchemy.sql.sqltypes import BigInteger
-from sqlalchemy.sql.sqltypes import Date
-from sqlalchemy.sql.schema import ForeignKeyConstraint
-from sqlalchemy.sql.sqltypes import Text
-
 
 # revision identifiers, used by Alembic.
 revision = 'K5wuTUCzvRIO8c9vP19zvMg'
@@ -140,7 +127,6 @@ def downgrade() -> None:
         ),
     )
     # ### end Alembic commands ###
-
 
 
 _Meta = MetaData()
