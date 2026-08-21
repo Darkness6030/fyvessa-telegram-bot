@@ -1,3 +1,5 @@
+import html
+
 from aiogram import Dispatcher, F, Router
 from aiogram.enums import ChatType
 from aiogram.filters import Command, CommandStart
@@ -36,8 +38,21 @@ class StartCallback(CallbackData, prefix='start'):
 
 
 WELCOME_TEXT = (
-    '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'
-    'Рады видеть вас в нашем магазине. Нажмите «СТАРТ», чтобы продолжить.'
+    '✨ <b>ДОБРО ПОЖАЛОВАТЬ В FYVESSA</b> ✨\n\n'
+    'Мы рады приветствовать вас в нашем магазине 🖤\n\n'
+    'Здесь вы найдёте всё, чтобы подчеркнуть свой стиль и создать особенное '
+    'настроение:\n'
+    '🖤 парфюмерию\n'
+    '✨ красоту и уход\n'
+    '🎧 технику\n'
+    '💎 аксессуары\n\n'
+    'Мы тщательно подбираем ассортимент и заботимся о качестве каждого заказа.\n\n'
+    'А чтобы вы могли познакомиться с мнением наших покупателей, мы собрали '
+    'отзывы наших клиентов в отдельном канале:\n\n'
+    '💬 <b>ОТЗЫВЫ</b>\n'
+    '{reviews_link}\n\n'
+    'Спасибо, что выбираете FYVESSA 🖤\n'
+    'Ваш стиль — наша эстетика.'
 )
 
 START_TEXT = (
@@ -60,6 +75,16 @@ def create_welcome_keyboard() -> InlineKeyboardMarkup:
     return inline_keyboard([
         ('СТАРТ', StartCallback(action='continue')),
     ])
+
+
+def create_welcome_text() -> str:
+    reviews_url = html.escape(get_settings().reviews_channel_url, quote=True)
+    reviews_link = (
+        f'<a href="{reviews_url}">Перейти к отзывам</a>'
+        if reviews_url
+        else 'Перейти к отзывам'
+    )
+    return WELCOME_TEXT.format(reviews_link=reviews_link)
 
 
 def create_main_keyboard(
@@ -124,7 +149,7 @@ async def start(message: Message, command: CommandObject):
 
     if is_first_start and not user.referrer_id:
         return await message.answer(
-            WELCOME_TEXT,
+            create_welcome_text(),
             reply_markup=create_welcome_keyboard(),
         )
 

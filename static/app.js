@@ -353,21 +353,59 @@ async function refreshShopState() {
     try { applyShopState(await api('/api/shop-state')); } catch (_) {}
 }
 
+async function writeClipboardText(value) {
+    try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+        await navigator.clipboard.writeText(value);
+        return;
+    } catch (_) {}
+
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch (_) {}
+    input.remove();
+    if (!copied) throw new Error('Copy command unavailable');
+}
+
 async function copyReferralLink(button) {
     const link = document.querySelector('[data-referral-link]')?.textContent?.trim();
     if (!link || !link.startsWith('http')) return showToast('Ссылка пока недоступна');
     try {
-        await navigator.clipboard.writeText(link);
+        await writeClipboardText(link);
     } catch (_) {
-        const input = document.createElement('textarea');
-        input.value = link;
-        document.body.appendChild(input);
-        input.select();
-        document.execCommand('copy');
-        input.remove();
+        return showToast('Не удалось скопировать ссылку');
     }
     if (button) button.textContent = 'Скопировано';
     showToast('Реферальная ссылка скопирована');
+}
+
+async function copyPaymentDetail(button) {
+    const value = button.querySelector('[data-payment-copy-value]')?.textContent?.trim();
+    if (!value) return showToast('Реквизиты пока недоступны');
+
+    try {
+        await writeClipboardText(value);
+    } catch (_) {
+        return showToast('Не удалось скопировать реквизиты');
+    }
+
+    const label = button.querySelector('[data-payment-copy-label]');
+    if (label) {
+        label.textContent = 'Скопировано ✓';
+        clearTimeout(button.__fyvessaCopyTimer);
+        button.__fyvessaCopyTimer = setTimeout(() => {
+            if (label.isConnected) label.textContent = 'Копировать';
+        }, 1800);
+    }
+    showToast('Реквизиты скопированы');
+    tg?.HapticFeedback?.notificationOccurred('success');
 }
 
 function shareReferralLink() {

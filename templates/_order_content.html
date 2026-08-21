@@ -43,7 +43,15 @@
   {% if order.status == 'awaiting_payment' %}
   {% if payment_details %}
   <div class="mt-6 rounded-2xl bg-cream p-4 text-sm"><strong>Реквизиты для оплаты</strong>
-    <p class="mt-1 whitespace-pre-line text-black/65">{{ payment_details }}</p>
+    <p class="mt-1 text-xs text-black/55">Нажмите на нужную строку, чтобы скопировать.</p>
+    <div class="mt-3 space-y-2">
+      {% for detail in payment_details.splitlines() if detail|trim %}
+      <button aria-label="Скопировать реквизиты: {{ detail|trim }}" class="flex w-full items-center justify-between gap-3 rounded-xl bg-white px-3 py-3 text-left" onclick="copyPaymentDetail(this)" type="button">
+        <span class="min-w-0 break-words font-mono font-bold text-ink" data-payment-copy-value>{{ detail|trim }}</span>
+        <span class="shrink-0 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white" data-payment-copy-label>Копировать</span>
+      </button>
+      {% endfor %}
+    </div>
     <p class="mt-3 text-black/55">После перевода нажмите «Я оплатил». Администратор получит заказ в рабочем чате и проверит платёж.</p></div>
   <button class="mt-3 w-full rounded-xl bg-ink py-4 font-black text-white disabled:opacity-50" onclick="reportPayment({{ order.id }}, this)">Я оплатил</button>
   {% else %}
