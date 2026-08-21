@@ -55,28 +55,6 @@ WELCOME_TEXT = (
     'Ваш стиль — наша эстетика.'
 )
 
-START_TEXT = (
-    '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'
-    'Здесь можно найти нужный товар, посмотреть новинки и популярное, '
-    'использовать скидки и коины и оформить заказ прямо в Telegram.\n\n'
-    'Если понадобится помощь — поддержка рядом.'
-)
-
-REFERRAL_START_TEXT = (
-    '<b>Добро пожаловать в Fyvessa!</b> 👋\n\n'
-    'Вы перешли по ссылке друга. Откройте площадки ниже и подпишитесь, затем '
-    'перейдите в «Подтвердить подписки». После проверки настроенные награды будут '
-    'начислены вам и пригласившему вас пользователю.\n\n'
-    'Магазин и остальные разделы также доступны по кнопкам ниже.'
-)
-
-
-def create_welcome_keyboard() -> InlineKeyboardMarkup:
-    return inline_keyboard([
-        ('СТАРТ', StartCallback(action='continue')),
-    ])
-
-
 def create_welcome_text() -> str:
     reviews_url = html.escape(get_settings().reviews_channel_url, quote=True)
     reviews_link = (
@@ -120,12 +98,9 @@ def create_main_keyboard(
     return inline_keyboard(buttons)
 
 
-async def _referral_start_content(user: User) -> tuple[str, InlineKeyboardMarkup]:
+async def _main_keyboard_for_user(user: User) -> InlineKeyboardMarkup:
     channels = await SocialChannel.get_active() if user.referrer_id else []
-    return (
-        REFERRAL_START_TEXT if user.referrer_id else START_TEXT,
-        create_main_keyboard(channels),
-    )
+    return create_main_keyboard(channels)
 
 
 @router.message(CommandStart())
@@ -144,11 +119,11 @@ async def start(message: Message, command: CommandObject):
         last_name=message.from_user.last_name,
         referrer_id=referrer_id,
     )
-    await initialize_referral_rewards(user)
 
+    await initialize_referral_rewards(user)
     await message.answer(
         create_welcome_text(),
-        reply_markup=create_welcome_keyboard(),
+        reply_markup=await _main_keyboard_for_user(user),
     )
 
 
@@ -156,13 +131,13 @@ async def start(message: Message, command: CommandObject):
 @transaction(1)
 async def continue_to_start(callback: CallbackQuery):
     user = await User.get_by_id(callback.from_user.id)
-    text, keyboard = await _referral_start_content(user) if user else (
-        START_TEXT,
-        create_main_keyboard(),
-    )
     await callback.message.edit_text(
-        text,
-        reply_markup=keyboard,
+        create_welcome_text(),
+        reply_markup=(
+            await _main_keyboard_for_user(user)
+            if user
+            else create_main_keyboard()
+        ),
     )
     await callback.answer()
 
