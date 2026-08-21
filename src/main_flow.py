@@ -131,7 +131,6 @@ async def _referral_start_content(user: User) -> tuple[str, InlineKeyboardMarkup
 @router.message(CommandStart())
 @transaction(1)
 async def start(message: Message, command: CommandObject):
-    is_first_start = await User.get_by_id(message.from_user.id) is None
     referrer_id = None
     if command.args and command.args.isdigit():
         referrer = await User.get_by_id(int(command.args))
@@ -147,14 +146,10 @@ async def start(message: Message, command: CommandObject):
     )
     await initialize_referral_rewards(user)
 
-    if is_first_start and not user.referrer_id:
-        return await message.answer(
-            create_welcome_text(),
-            reply_markup=create_welcome_keyboard(),
-        )
-
-    text, keyboard = await _referral_start_content(user)
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer(
+        create_welcome_text(),
+        reply_markup=create_welcome_keyboard(),
+    )
 
 
 @router.callback_query(StartCallback.filter(F.action == 'continue'))
