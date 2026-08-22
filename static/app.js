@@ -90,11 +90,7 @@ function initBannerCarousels(root = document) {
             }, 5000);
         };
 
-        let scrollTimer;
-        slider.addEventListener('scroll', () => {
-            clearTimeout(scrollTimer);
-            scrollTimer = setTimeout(updateDots, 80);
-        }, {passive: true});
+        slider.addEventListener('scroll', updateDots, {passive: true});
         slider.addEventListener('pointerdown', stop);
         slider.addEventListener('pointerup', resume);
         slider.addEventListener('pointercancel', resume);
