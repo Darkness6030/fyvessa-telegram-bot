@@ -17,7 +17,7 @@ from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
 from src.models import SocialChannel, User
-from src.referrals import initialize_referral_rewards
+from src.referrals import award_referral_activation, initialize_referral_rewards
 from src.settings import get_settings
 
 
@@ -106,6 +106,7 @@ async def _main_keyboard_for_user(user: User) -> InlineKeyboardMarkup:
 @router.message(CommandStart())
 @transaction(1)
 async def start(message: Message, command: CommandObject):
+    existing_user = await User.get_by_id(message.from_user.id)
     referrer_id = None
     if command.args and command.args.isdigit():
         referrer = await User.get_by_id(int(command.args))
@@ -120,6 +121,8 @@ async def start(message: Message, command: CommandObject):
         referrer_id=referrer_id,
     )
 
+    if existing_user is None:
+        await award_referral_activation(user)
     await initialize_referral_rewards(user)
     await message.answer(
         create_welcome_text(),

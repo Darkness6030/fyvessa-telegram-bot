@@ -21,6 +21,7 @@ from rewire_sqlmodel import session_context, transaction
 
 from src import bot
 from src.catalog import CatalogValidationError, sync_catalog
+from src.coins import whole_coin_reward
 from src.keyboards import inline_keyboard
 from src.models import (
     AvailabilityRequest,
@@ -37,9 +38,12 @@ from src.models import (
 from src.orders import cancel_order, confirm_payment, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
 from src.payouts import current_partner_accruals, mark_payout_paid, next_payout_cutoff
 from src.referrals import (
+    adjust_user_coins,
     approve_referral_reward,
+    get_referral_activation_reward,
     get_purchase_coin_percent,
     reject_referral_reward,
+    set_referral_activation_reward,
     set_purchase_coin_percent,
 )
 from src.settings import SettingsValidationError, sync_settings
@@ -115,6 +119,8 @@ class ReferralReviewCallback(CallbackData, prefix='ref'):
 
 class CoinSettingsCallback(CallbackData, prefix='coin'):
     action: str
+    page: int = 0
+    user_id: int = 0
 
 
 class PromocodeForm(StatesGroup):
@@ -131,6 +137,8 @@ class SocialForm(StatesGroup):
 
 class CoinSettingsForm(StatesGroup):
     percent = State()
+    activation_reward = State()
+    adjustment = State()
 
 
 AVAILABILITY_LABELS = {
@@ -164,6 +172,7 @@ ORDER_COMMAND_ACTIONS = {
 }
 
 BANNER_DIRECTORY = Path('assets/banners')
+COIN_HISTORY_PAGE_SIZE = 7
 BANNER_IMAGE_SUFFIXES = {
     'image/avif': '.avif',
     'image/gif': '.gif',
@@ -637,9 +646,14 @@ def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
         for text, section in (
             ('📦 Заказы', 'orders'),
             ('🔎 Запросы наличия', 'availability'),
+            ('🪙 История коинов', 'coins'),
             ('🔄 Обновить карточку', 'card'),
         )
     ]
+    buttons.append((
+        '± Изменить коины',
+        CoinSettingsCallback(action='adjust', user_id=user_id),
+    ))
 
     if page > 0:
         buttons.append((
@@ -654,7 +668,7 @@ def _user_keyboard(user_id: int, page: int = 0, total: int = 1):
         ))
 
     buttons.append(('🏠 Меню', AdminSectionCallback(section='menu')))
-    return inline_keyboard(buttons, 2, 1, 2, 1)
+    return inline_keyboard(buttons, 2, 2, 1, 2, 1)
 
 
 @router.message(Command('user'))
@@ -1146,8 +1160,9 @@ async def _show_referral_reviews(callback: CallbackQuery, page: int = 0) -> None
 
 
 async def _show_coin_settings(callback: CallbackQuery) -> None:
+    activation_reward = await get_referral_activation_reward()
     percent = await get_purchase_coin_percent()
-    transactions = await CoinTransaction.get_recent(limit=10)
+    transactions = await CoinTransaction.get_recent(limit=5)
     history = '\n'.join(
         f'• {transaction.created_at:%d.%m %H:%M} · '
         f'<code>{transaction.user_id}</code> · {transaction.amount:+} · '
@@ -1157,14 +1172,91 @@ async def _show_coin_settings(callback: CallbackQuery) -> None:
     await _edit_message(
         callback,
         '<b>Настройки коинов</b>\n\n'
+        f'Награда за первую реферальную активацию: <b>{activation_reward} коинов</b>\n'
         f'Процент коинов с покупки: <b>{percent}%</b>\n\n'
         '<b>Последние начисления и списания</b>\n'
         f'{history}',
         inline_keyboard([
+            ('✏️ Награда за активацию', CoinSettingsCallback(action='activation')),
             ('✏️ Изменить процент', CoinSettingsCallback(action='percent')),
+            ('± Ручная операция', CoinSettingsCallback(action='adjust')),
+            ('📜 Вся история', CoinSettingsCallback(action='history')),
             ('🌐 Социальные сети и награды', AdminSectionCallback(section='socials')),
             ('🏠 Меню', AdminSectionCallback(section='menu')),
         ]),
+    )
+
+
+def _coin_history_keyboard(page: int, total_pages: int, user_id: int = 0):
+    buttons = []
+    if page > 0:
+        callback = (
+            UserSectionCallback(user_id=user_id, section='coins', page=page - 1)
+            if user_id
+            else CoinSettingsCallback(action='history', page=page - 1)
+        )
+        buttons.append((f'← {page}/{total_pages}', callback))
+    if page + 1 < total_pages:
+        callback = (
+            UserSectionCallback(user_id=user_id, section='coins', page=page + 1)
+            if user_id
+            else CoinSettingsCallback(action='history', page=page + 1)
+        )
+        buttons.append((f'{page + 2}/{total_pages} →', callback))
+    if user_id:
+        buttons.append((
+            '← Пользователь',
+            UserSectionCallback(user_id=user_id, section='card'),
+        ))
+    else:
+        buttons.append(('← Настройки коинов', AdminSectionCallback(section='coins')))
+    buttons.append(('🏠 Меню', AdminSectionCallback(section='menu')))
+    return inline_keyboard(buttons, 2, 1, 1)
+
+
+async def _show_coin_history(
+    callback: CallbackQuery,
+    page: int = 0,
+    user_id: int = 0,
+) -> None:
+    total = await CoinTransaction.count(user_id=user_id or None)
+    total_pages = max(1, (total + COIN_HISTORY_PAGE_SIZE - 1) // COIN_HISTORY_PAGE_SIZE)
+    page = min(max(page, 0), total_pages - 1)
+    transactions = await CoinTransaction.get_page(
+        page=page,
+        page_size=COIN_HISTORY_PAGE_SIZE,
+        user_id=user_id or None,
+    )
+
+    entries = []
+    for transaction in transactions:
+        order = (
+            await Order.get_by_id(transaction.order_id)
+            if transaction.order_id else None
+        )
+        order_text = (
+            f' · заказ <b>{html.escape(order.number)}</b>'
+            if order else ''
+        )
+        admin_text = (
+            f' · админ <code>{transaction.admin_id}</code>'
+            if transaction.admin_id else ''
+        )
+        entries.append(
+            f'<b>#{transaction.id}</b> · {transaction.created_at:%d.%m.%Y %H:%M}\n'
+            f'Пользователь <code>{transaction.user_id}</code>{admin_text}{order_text}\n'
+            f'{transaction.amount:+} → баланс {transaction.balance_after}\n'
+            f'{html.escape(transaction.reason)}'
+        )
+
+    scope = f' пользователя <code>{user_id}</code>' if user_id else ''
+    history = '\n\n'.join(entries) or 'Операций пока нет.'
+    await _edit_message(
+        callback,
+        f'<b>История коинов{scope}</b>\n'
+        f'Страница {page + 1} из {total_pages} · всего операций: {total}\n\n'
+        f'{history}',
+        _coin_history_keyboard(page, total_pages, user_id),
     )
 
 
@@ -1367,6 +1459,8 @@ async def user_section(callback: CallbackQuery, callback_data: UserSectionCallba
                 availability, user_id=user.id, page=page, total=len(requests),
             ),
         )
+    elif callback_data.section == 'coins':
+        await _show_coin_history(callback, callback_data.page, user.id)
     else:
         await _edit_message(callback, await _user_text(user), _user_keyboard(user.id))
 
@@ -2010,12 +2104,10 @@ async def social_form(message: Message, state: FSMContext):
         if not platform or not account_name:
             raise ValueError('Площадка и название аккаунта обязательны')
         url = _valid_url(url)
-        coin_reward = Decimal(reward_text.replace(',', '.'))
-        invitee_coin_reward = Decimal(invitee_reward_text.replace(',', '.'))
-        if not Decimal('0') <= coin_reward <= Decimal('1000000'):
-            raise ValueError('Награда пригласившему должна быть от 0 до 1 000 000')
-        if not Decimal('0') <= invitee_coin_reward <= Decimal('1000000'):
-            raise ValueError('Награда подписавшемуся должна быть от 0 до 1 000 000')
+        coin_reward = whole_coin_reward(Decimal(reward_text.replace(',', '.')))
+        invitee_coin_reward = whole_coin_reward(
+            Decimal(invitee_reward_text.replace(',', '.'))
+        )
         telegram_chat_id = None if telegram_chat_id == '-' else telegram_chat_id
         if platform.casefold() == 'telegram' and not telegram_chat_id:
             raise ValueError('Для автоматической проверки Telegram укажите @channel или chat ID')
@@ -2078,21 +2170,56 @@ async def referral_review_action(
 
 
 @router.callback_query(CoinSettingsCallback.filter())
+@transaction(1)
 async def coin_settings_action(
     callback: CallbackQuery,
     callback_data: CoinSettingsCallback,
     state: FSMContext,
 ):
-    if callback_data.action != 'percent':
-        return await callback.answer('Действие не найдено', show_alert=True)
-    await state.set_state(CoinSettingsForm.percent)
-    await _edit_message(
-        callback,
-        '<b>Процент коинов с покупки</b>\n\n'
-        'Отправьте число от 0 до 100. Новое значение применяется только к заказам, '
-        'оплата которых будет подтверждена после изменения.',
-        _back_keyboard('coins'),
-    )
+    if callback_data.action == 'history':
+        return await _show_coin_history(callback, callback_data.page)
+    if callback_data.action == 'percent':
+        await state.set_state(CoinSettingsForm.percent)
+        return await _edit_message(
+            callback,
+            '<b>Процент коинов с покупки</b>\n\n'
+            'Отправьте число от 0 до 100. Новое значение применяется только к заказам, '
+            'оплата которых будет подтверждена после изменения.',
+            _back_keyboard('coins'),
+        )
+    if callback_data.action == 'activation':
+        await state.set_state(CoinSettingsForm.activation_reward)
+        return await _edit_message(
+            callback,
+            '<b>Награда за первую реферальную активацию</b>\n\n'
+            'Отправьте целое неотрицательное число. Значение 0 отключает начисление. '
+            'Верхнего ограничения нет.',
+            _back_keyboard('coins'),
+        )
+    if callback_data.action == 'adjust':
+        user = (
+            await User.get_by_id(callback_data.user_id)
+            if callback_data.user_id else None
+        )
+        if callback_data.user_id and not user:
+            return await callback.answer('Пользователь не найден', show_alert=True)
+        await state.set_state(CoinSettingsForm.adjustment)
+        await state.update_data(coin_adjustment_user_id=user.id if user else 0)
+        if user:
+            prompt = (
+                f'<b>Изменение коинов пользователя {user.id}</b>\n\n'
+                f'Текущий баланс: <b>{user.coin_balance}</b>\n'
+                'Отправьте: <code>+100 | причина</code> или '
+                '<code>-50 | причина</code>.'
+            )
+        else:
+            prompt = (
+                '<b>Ручное изменение коинов</b>\n\n'
+                'Отправьте одной строкой:\n'
+                '<code>username или Telegram ID | +100 или -50 | причина</code>'
+            )
+        return await _edit_message(callback, prompt, _back_keyboard('coins'))
+    await callback.answer('Действие не найдено', show_alert=True)
 
 
 @router.message(CoinSettingsForm.percent)
@@ -2110,6 +2237,81 @@ async def coin_settings_form(message: Message, state: FSMContext):
     await message.answer(
         f'Процент коинов с новых оплаченных заказов: <b>{value}%</b>.',
         reply_markup=_back_keyboard('coins'),
+    )
+
+
+@router.message(CoinSettingsForm.activation_reward)
+@transaction(1)
+async def coin_activation_reward_form(message: Message, state: FSMContext):
+    try:
+        value = Decimal((message.text or '').strip().replace(',', '.'))
+        value = await set_referral_activation_reward(value)
+    except (InvalidOperation, ValueError) as exc:
+        return await message.answer(
+            f'Не удалось сохранить: {html.escape(str(exc))}',
+            reply_markup=_back_keyboard('coins'),
+        )
+    await state.clear()
+    await message.answer(
+        f'Награда за первую реферальную активацию: <b>{value} коинов</b>.',
+        reply_markup=_back_keyboard('coins'),
+    )
+
+
+@router.message(CoinSettingsForm.adjustment)
+@transaction(1)
+async def coin_adjustment_form(message: Message, state: FSMContext):
+    data = await state.get_data()
+    fixed_user_id = int(data.get('coin_adjustment_user_id', 0))
+    parts = [part.strip() for part in (message.text or '').split('|')]
+    expected_parts = 2 if fixed_user_id else 3
+    if len(parts) != expected_parts:
+        example = (
+            '<code>+100 | причина</code>' if fixed_user_id
+            else '<code>username/ID | +100 | причина</code>'
+        )
+        return await message.answer(
+            f'Неверный формат. Пример: {example}',
+            reply_markup=_back_keyboard('coins'),
+        )
+
+    if fixed_user_id:
+        user = await User.get_by_id(fixed_user_id)
+        amount_text, reason = parts
+    else:
+        user = await User.find(parts[0])
+        amount_text, reason = parts[1:]
+
+    try:
+        if not user:
+            raise ValueError('Пользователь не найден')
+        amount = Decimal(amount_text.replace(',', '.'))
+        transaction = await adjust_user_coins(
+            user,
+            amount,
+            reason,
+            message.from_user.id,
+        )
+    except (InvalidOperation, ValueError) as exc:
+        return await message.answer(
+            f'Не удалось выполнить операцию: {html.escape(str(exc))}',
+            reply_markup=_back_keyboard('coins'),
+        )
+
+    await state.clear()
+    action = 'начислено' if transaction.amount > 0 else 'списано'
+    await bot.send_message(
+        user.id,
+        f'<b>Баланс коинов изменён</b>\n\n'
+        f'{action.capitalize()}: {abs(transaction.amount)}\n'
+        f'Причина: {html.escape(reason)}\n'
+        f'Новый баланс: {transaction.balance_after}',
+    )
+    await message.answer(
+        f'Готово: пользователю <code>{user.id}</code> {action} '
+        f'<b>{abs(transaction.amount)}</b> коинов.\n'
+        f'Новый баланс: <b>{transaction.balance_after}</b>.',
+        reply_markup=_user_keyboard(user.id),
     )
 
 

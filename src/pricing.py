@@ -1,11 +1,27 @@
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, localcontext, ROUND_HALF_UP
 
 MONEY = Decimal('0.01')
 
 
 def money(value: Decimal) -> Decimal:
-    return value.quantize(MONEY, rounding=ROUND_HALF_UP)
+    if not value.is_finite():
+        raise ValueError('Money value must be finite')
+    precision = max(28, len(value.as_tuple().digits) + 2, value.adjusted() + 3)
+    with localcontext() as context:
+        context.prec = precision
+        return value.quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
+def money_sum(*values: Decimal) -> Decimal:
+    if not values or any(not value.is_finite() for value in values):
+        raise ValueError('Money values must be finite')
+    integer_digits = max(max(value.adjusted() + 1, 1) for value in values)
+    fraction_digits = max(max(-value.as_tuple().exponent, 0) for value in values)
+    precision = max(28, integer_digits + fraction_digits + len(str(len(values))) + 2)
+    with localcontext() as context:
+        context.prec = precision
+        return money(sum(values, Decimal('0')))
 
 
 @dataclass(frozen=True)

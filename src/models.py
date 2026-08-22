@@ -125,6 +125,11 @@ class User(SQLModel, table=True):
         ondelete='SET NULL',
     )
     referral_discount_awarded_at: Optional[datetime] = None
+    referral_activation_reward_awarded_at: Optional[datetime] = None
+    referral_activation_reward_amount: Decimal = Field(
+        default=Decimal('0'),
+        decimal_places=2,
+    )
 
     coin_balance: Decimal = Field(default=Decimal(0), decimal_places=2)
     personal_discount_percent: Decimal = Field(default=Decimal(0), decimal_places=2)
@@ -136,6 +141,10 @@ class User(SQLModel, table=True):
     @classmethod
     async def get_by_id(cls, user_id: int) -> Optional[Self]:
         return await cls.select().filter_by(id=user_id).first()
+
+    @classmethod
+    async def get_by_id_for_update(cls, user_id: int) -> Optional[Self]:
+        return await cls.select().filter_by(id=user_id).with_for_update().first()
 
     @classmethod
     async def find(cls, value: str) -> Optional[Self]:
@@ -452,6 +461,7 @@ class CoinTransaction(SQLModel, table=True):
         foreign_key='referralreward.id',
         index=True,
     )
+    admin_id: Optional[int] = Field(default=None, sa_type=BigInteger, index=True)
     amount: Decimal = Field(decimal_places=2)
     balance_after: Decimal = Field(decimal_places=2)
     reason: str
@@ -466,6 +476,31 @@ class CoinTransaction(SQLModel, table=True):
         if user_id is not None:
             query = query.filter_by(user_id=user_id)
         return list(await query.order_by(cls.created_at.desc()).limit(limit).all())
+
+    @classmethod
+    async def get_page(
+        cls,
+        page: int,
+        page_size: int,
+        user_id: Optional[int] = None,
+    ) -> list[Self]:
+        query = cls.select()
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        return list(
+            await query
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .offset(max(page, 0) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+    @classmethod
+    async def count(cls, user_id: Optional[int] = None) -> int:
+        query = select(func.count(cls.id))
+        if user_id is not None:
+            query = query.where(cls.user_id == user_id)
+        return (await session_context.get().execute(query)).scalar_one()
 
 
 class AppSetting(SQLModel, table=True):

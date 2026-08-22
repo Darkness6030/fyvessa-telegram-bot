@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from rewire_sqlmodel import session_context
 
 from src.bot import get_bot, send_message
+from src.coins import adjusted_coin_balance, whole_coin_reward
 from src.models import (
     AppSetting,
     CoinTransaction,
@@ -16,9 +17,11 @@ from src.models import (
     SocialChannel,
     User,
 )
-from src.pricing import money
+from src.pricing import money, money_sum
 
 PURCHASE_COIN_PERCENT_KEY = 'purchase_coin_percent'
+REFERRAL_ACTIVATION_REWARD_KEY = 'referral_activation_coin_reward'
+DEFAULT_REFERRAL_ACTIVATION_REWARD = Decimal('5')
 MAX_REFERRAL_DISCOUNT = Decimal('10')
 REFERRAL_DISCOUNT_STEP = Decimal('1')
 _bot_username = ''
@@ -46,6 +49,87 @@ async def set_purchase_coin_percent(value: Decimal) -> Decimal:
     setting.updated_at = datetime.now()
     setting.add()
     return value
+
+
+async def get_referral_activation_reward() -> Decimal:
+    setting = await AppSetting.get_by_key(REFERRAL_ACTIVATION_REWARD_KEY)
+    if not setting:
+        return DEFAULT_REFERRAL_ACTIVATION_REWARD
+    try:
+        return whole_coin_reward(Decimal(setting.value))
+    except (InvalidOperation, ValueError):
+        return DEFAULT_REFERRAL_ACTIVATION_REWARD
+
+
+async def set_referral_activation_reward(value: Decimal) -> Decimal:
+    value = whole_coin_reward(value)
+    setting = await AppSetting.get_by_key(REFERRAL_ACTIVATION_REWARD_KEY)
+    if not setting:
+        setting = AppSetting(key=REFERRAL_ACTIVATION_REWARD_KEY)
+    setting.value = str(value)
+    setting.updated_at = datetime.now()
+    setting.add()
+    return value
+
+
+async def award_referral_activation(user: User) -> Decimal:
+    if (
+        not user.referrer_id
+        or user.referrer_id == user.id
+        or user.referral_activation_reward_awarded_at is not None
+    ):
+        return user.referral_activation_reward_amount
+
+    referrer = await User.get_by_id_for_update(user.referrer_id)
+    if not referrer:
+        return Decimal('0')
+
+    reward = await get_referral_activation_reward()
+    current_time = datetime.now()
+    user.referral_activation_reward_awarded_at = current_time
+    user.referral_activation_reward_amount = reward
+    user.updated_at = current_time
+    user.add()
+
+    if not reward:
+        return reward
+
+    referrer.coin_balance = money_sum(referrer.coin_balance, reward)
+    referrer.updated_at = current_time
+    referrer.add()
+    CoinTransaction(
+        user_id=referrer.id,
+        amount=reward,
+        balance_after=referrer.coin_balance,
+        reason=f'Активация бота приглашённым пользователем {user.id}',
+    ).add()
+    return reward
+
+
+async def adjust_user_coins(
+    user: User,
+    amount: Decimal,
+    reason: str,
+    admin_id: int,
+) -> CoinTransaction:
+    reason = reason.strip()
+    if not reason or len(reason) > 300:
+        raise ValueError('Укажите причину длиной до 300 символов')
+
+    user = await User.get_by_id_for_update(user.id) or user
+    amount, balance_after = adjusted_coin_balance(user.coin_balance, amount)
+
+    user.coin_balance = balance_after
+    user.updated_at = datetime.now()
+    user.add()
+    transaction = CoinTransaction(
+        user_id=user.id,
+        admin_id=admin_id,
+        amount=amount,
+        balance_after=balance_after,
+        reason=f'Ручная корректировка: {reason}',
+    ).add()
+    return transaction
 
 
 async def bot_username() -> str:
@@ -149,7 +233,7 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
     await session_context.get().flush()
 
     if reward_amount:
-        referrer.coin_balance = money(referrer.coin_balance + reward_amount)
+        referrer.coin_balance = money_sum(referrer.coin_balance, reward_amount)
         referrer.updated_at = current_time
         referrer.add()
         CoinTransaction(
@@ -165,8 +249,8 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
         ).add()
 
     if invitee_reward_amount:
-        invited_user.coin_balance = money(
-            invited_user.coin_balance + invitee_reward_amount
+        invited_user.coin_balance = money_sum(
+            invited_user.coin_balance, invitee_reward_amount
         )
         invited_user.updated_at = current_time
         invited_user.add()
@@ -280,7 +364,7 @@ async def award_purchase_coins(user: User, order: Order) -> Decimal:
     if not reward:
         return reward
 
-    user.coin_balance = money(user.coin_balance + reward)
+    user.coin_balance = money_sum(user.coin_balance, reward)
     user.updated_at = datetime.now()
     user.add()
     CoinTransaction(
