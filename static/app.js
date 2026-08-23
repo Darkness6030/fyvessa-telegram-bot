@@ -371,25 +371,34 @@ async function writeClipboardText(value) {
 }
 
 async function copyReferralLink(button) {
-    const link = button?.dataset.referralLink?.trim()
-        || document.querySelector('[data-referral-link]')?.textContent?.trim();
+    const link = document.querySelector('[data-referral-link]')?.textContent?.trim();
     if (!link || !link.startsWith('http')) return showToast('Ссылка пока недоступна');
     try {
         await writeClipboardText(link);
     } catch (_) {
         return showToast('Не удалось скопировать ссылку');
     }
-    const label = button?.querySelector('[data-referral-copy-label]');
-    if (label) {
-        label.textContent = 'Скопировано ✓';
-        clearTimeout(button.__fyvessaCopyTimer);
-        button.__fyvessaCopyTimer = setTimeout(() => {
-            if (label.isConnected) label.textContent = 'Скопировать';
-        }, 1800);
-    } else if (button) {
-        button.textContent = 'Скопировано';
-    }
+    if (button) button.textContent = 'Скопировано';
     showToast('Реферальная ссылка скопирована');
+}
+
+async function copyReferralPlatformLink(button) {
+    const link = button?.dataset.copyLink?.trim();
+    if (!link) return showToast('Ссылка пока недоступна');
+
+    try {
+        await writeClipboardText(link);
+    } catch (_) {
+        return showToast('Не удалось скопировать ссылку');
+    }
+
+    button.textContent = 'Скопировано ✓';
+    clearTimeout(button.__fyvessaCopyTimer);
+    button.__fyvessaCopyTimer = setTimeout(() => {
+        if (button.isConnected) button.textContent = 'Скопировать ссылку';
+    }, 1800);
+    showToast('Ссылка на площадку скопирована');
+    tg?.HapticFeedback?.notificationOccurred('success');
 }
 
 async function copyPaymentDetail(button) {

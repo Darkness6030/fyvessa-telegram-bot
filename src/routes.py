@@ -535,7 +535,6 @@ async def profile_fragment(request: Request, user: RequestUser) -> HTMLResponse:
             'favorites_count': favorites_count,
             'cart_quantity': sum(cart_item.quantity for cart_item in cart_items),
             'orders_count': orders_count,
-            'referral_link': await personal_referral_link(user.id),
             'support_url': get_settings().support_url,
             'today': date.today().isoformat(),
         },
