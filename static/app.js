@@ -371,14 +371,24 @@ async function writeClipboardText(value) {
 }
 
 async function copyReferralLink(button) {
-    const link = document.querySelector('[data-referral-link]')?.textContent?.trim();
+    const link = button?.dataset.referralLink?.trim()
+        || document.querySelector('[data-referral-link]')?.textContent?.trim();
     if (!link || !link.startsWith('http')) return showToast('Ссылка пока недоступна');
     try {
         await writeClipboardText(link);
     } catch (_) {
         return showToast('Не удалось скопировать ссылку');
     }
-    if (button) button.textContent = 'Скопировано';
+    const label = button?.querySelector('[data-referral-copy-label]');
+    if (label) {
+        label.textContent = 'Скопировано ✓';
+        clearTimeout(button.__fyvessaCopyTimer);
+        button.__fyvessaCopyTimer = setTimeout(() => {
+            if (label.isConnected) label.textContent = 'Скопировать';
+        }, 1800);
+    } else if (button) {
+        button.textContent = 'Скопировано';
+    }
     showToast('Реферальная ссылка скопирована');
 }
 
