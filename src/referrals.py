@@ -27,6 +27,37 @@ REFERRAL_DISCOUNT_STEP = Decimal('1')
 _bot_username = ''
 
 
+def _approval_messages(
+    channel: SocialChannel,
+    reward_amount: Decimal,
+    invitee_reward_amount: Decimal,
+    personal_discount_percent: Decimal,
+) -> tuple[str, str]:
+    referrer_message = (
+        (
+            '<b>Реферальная награда начислена</b> 🎉\n\n'
+            if reward_amount
+            else '<b>Подписка приглашённого подтверждена</b> 🎉\n\n'
+        )
+        + (
+            f'{reward_amount} коинов за подтверждённую подписку приглашённого.\n'
+            if reward_amount
+            else ''
+        )
+        + f'Персональная скидка: {personal_discount_percent}%.'
+    )
+    invitee_message = (
+        '<b>Подписка подтверждена</b> 🎉\n\n'
+        f'{html.escape(channel.platform)} / {html.escape(channel.account_name)}.'
+        + (
+            f'\nВам начислено: {invitee_reward_amount} коинов.'
+            if invitee_reward_amount
+            else ''
+        )
+    )
+    return referrer_message, invitee_message
+
+
 async def get_purchase_coin_percent() -> Decimal:
     setting = await AppSetting.get_by_key(PURCHASE_COIN_PERCENT_KEY)
     if not setting:
@@ -275,18 +306,14 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
         referrer.add()
         invited_user.referral_discount_awarded_at = current_time
         invited_user.add()
-    await send_message(
-        referrer.id,
-        '<b>Реферальная награда начислена</b> 🎉\n\n'
-        f'{reward_amount} коинов за подтверждённую подписку приглашённого.\n'
-        f'Персональная скидка: {referrer.personal_discount_percent}%.',
+    referrer_message, invitee_message = _approval_messages(
+        channel,
+        reward_amount,
+        invitee_reward_amount,
+        referrer.personal_discount_percent,
     )
-    await send_message(
-        invited_user.id,
-        '<b>Подписка подтверждена</b> 🎉\n\n'
-        f'{html.escape(channel.platform)} / {html.escape(channel.account_name)}.\n'
-        f'Вам начислено: {invitee_reward_amount} коинов.',
-    )
+    await send_message(referrer.id, referrer_message)
+    await send_message(invited_user.id, invitee_message)
     return True
 
 

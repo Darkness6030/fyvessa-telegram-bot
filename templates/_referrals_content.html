@@ -23,15 +23,21 @@
       <article class="rounded-2xl border border-black/10 p-4">
         <div class="flex items-start justify-between gap-4">
           <div><p class="text-xs font-black uppercase tracking-wider text-coral">{{ channel.platform }}</p><h3 class="mt-1 font-black">{{ channel.account_name }}</h3></div>
+          {% if channel.coin_reward or channel.invitee_coin_reward %}
           <div class="space-y-1 text-right text-xs font-bold">
+            {% if channel.coin_reward %}
             <p class="whitespace-nowrap rounded-full bg-sage/20 px-3 py-1">За друга: +{{ channel.coin_reward }}</p>
+            {% endif %}
+            {% if channel.invitee_coin_reward %}
             <p class="whitespace-nowrap rounded-full bg-coral/10 px-3 py-1 text-coral">За подписку: +{{ channel.invitee_coin_reward }}</p>
+            {% endif %}
           </div>
+          {% endif %}
         </div>
         <button class="mt-4 w-full rounded-xl bg-ink px-4 py-3 text-center font-bold text-white" data-copy-link="{{ channel.url }}" onclick="copyReferralPlatformLink(this)" type="button">Скопировать ссылку</button>
         {% if user.referrer_id and reward %}
           {% if reward.status == 'approved' %}
-          <p class="mt-3 text-center text-sm font-bold text-sage">Подписка подтверждена ✓ · Вам начислено {{ reward.invitee_reward_amount }} коинов</p>
+          <p class="mt-3 text-center text-sm font-bold text-sage">Подписка подтверждена ✓{% if reward.invitee_reward_amount %} · Вам начислено {{ reward.invitee_reward_amount }} коинов{% endif %}</p>
           {% elif reward.status == 'preexisting' %}
           <p class="mt-3 text-center text-sm text-black/45">Подписка была оформлена раньше — повторная награда не начисляется.</p>
           {% elif reward.status == 'review' %}

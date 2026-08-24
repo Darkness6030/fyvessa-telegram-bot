@@ -257,15 +257,29 @@ async def notify_referral_review(
     channel: SocialChannel,
     user: User,
 ) -> bool:
-    return await bot.send_message(
-        Config.admin_chat_id,
+    reward_details = ''.join((
+        (
+            f'Награда пригласившему: {reward.reward_amount} коинов\n'
+            if reward.reward_amount
+            else ''
+        ),
+        (
+            f'Награда подписавшемуся: {reward.invitee_reward_amount} коинов\n'
+            if reward.invitee_reward_amount
+            else ''
+        ),
+    ))
+    message_text = (
         '<b>Подписка ожидает ручной проверки</b>\n\n'
         f'Пользователь: <code>{user.id}</code>\n'
         f'Площадка: {html.escape(channel.platform)} / '
         f'{html.escape(channel.account_name)}\n'
         f'Ссылка: {html.escape(channel.url)}\n'
-        f'Награда пригласившему: {reward.reward_amount} коинов\n'
-        f'Награда подписавшемуся: {reward.invitee_reward_amount} коинов',
+        f'{reward_details}'
+    ).rstrip()
+    return await bot.send_message(
+        Config.admin_chat_id,
+        message_text,
         reply_markup=inline_keyboard([
             (
                 '✅ Подтвердить',
@@ -1072,13 +1086,24 @@ async def _show_banners(callback: CallbackQuery, page: int = 0) -> None:
 
 def _social_text(channel: SocialChannel) -> str:
     check_mode = 'автоматически' if channel.supports_automatic_check else 'администратором'
+    reward_details = ''.join((
+        (
+            f'Награда пригласившему: <b>{channel.coin_reward} коинов</b>\n'
+            if channel.coin_reward
+            else ''
+        ),
+        (
+            f'Награда подписавшемуся: <b>{channel.invitee_coin_reward} коинов</b>\n'
+            if channel.invitee_coin_reward
+            else ''
+        ),
+    ))
     return (
         f'<b>Социальная сеть №{channel.id}</b>\n\n'
         f'Площадка: <b>{html.escape(channel.platform)}</b>\n'
         f'Аккаунт: <b>{html.escape(channel.account_name)}</b>\n'
         f'Ссылка: {html.escape(channel.url)}\n'
-        f'Награда пригласившему: <b>{channel.coin_reward} коинов</b>\n'
-        f'Награда подписавшемуся: <b>{channel.invitee_coin_reward} коинов</b>\n'
+        f'{reward_details}'
         f'Проверка: <b>{check_mode}</b>\n'
         f'Telegram chat ID: <code>{html.escape(channel.telegram_chat_id or "—")}</code>\n'
         f'Статус: <b>{"включена" if channel.is_active else "отключена"}</b>'
@@ -1120,6 +1145,18 @@ async def _referral_review_text(reward: ReferralReward) -> str:
     invited = await User.get_by_id(reward.invited_user_id)
     referrer = await User.get_by_id(reward.referrer_id)
     channel = await SocialChannel.get_by_id(reward.social_channel_id)
+    reward_details = ''.join((
+        (
+            f'Награда пригласившему: <b>{reward.reward_amount} коинов</b>\n'
+            if reward.reward_amount
+            else ''
+        ),
+        (
+            f'Награда подписавшемуся: <b>{reward.invitee_reward_amount} коинов</b>\n'
+            if reward.invitee_reward_amount
+            else ''
+        ),
+    ))
     return (
         '<b>Реферальная проверка</b>\n\n'
         f'Подписывается: <code>{reward.invited_user_id}</code> '
@@ -1128,8 +1165,7 @@ async def _referral_review_text(reward: ReferralReward) -> str:
         f'({html.escape(referrer.username or "без username") if referrer else "удалён"})\n'
         f'Площадка: <b>{html.escape(channel.platform) if channel else "удалена"}</b> / '
         f'{html.escape(channel.account_name) if channel else "—"}\n'
-        f'Награда пригласившему: <b>{reward.reward_amount} коинов</b>\n'
-        f'Награда подписавшемуся: <b>{reward.invitee_reward_amount} коинов</b>\n'
+        f'{reward_details}'
         f'Статус: <b>{reward.status}</b>'
     )
 
