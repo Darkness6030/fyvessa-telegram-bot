@@ -48,7 +48,7 @@ def _approval_messages(
     )
     invitee_message = (
         '<b>Подписка подтверждена</b> 🎉\n\n'
-        f'{html.escape(channel.platform)} / {html.escape(channel.account_name)}.'
+        f'{html.escape(channel.account_name)}.'
         + (
             f'\nВам начислено: {invitee_reward_amount} коинов.'
             if invitee_reward_amount
@@ -284,7 +284,7 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
             balance_after=referrer.coin_balance,
             reason=(
                 f'Подписка приглашённого {invited_user.id}: '
-                f'{channel.platform} / {channel.account_name}'
+                f'{channel.account_name}'
             ),
         ).add()
 
@@ -300,10 +300,7 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
             referral_reward_id=reward.id,
             amount=invitee_reward_amount,
             balance_after=invited_user.coin_balance,
-            reason=(
-                f'Награда за подписку: '
-                f'{channel.platform} / {channel.account_name}'
-            ),
+            reason=f'Награда за подписку: {channel.account_name}',
         ).add()
 
     if referrer and invited_user.referral_discount_awarded_at is None:

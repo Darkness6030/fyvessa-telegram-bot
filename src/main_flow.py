@@ -66,29 +66,11 @@ def create_welcome_text() -> str:
     return WELCOME_TEXT.format(reviews_link=reviews_link)
 
 
-def create_main_keyboard(
-    referral_channels: list[SocialChannel] | None = None,
-) -> InlineKeyboardMarkup:
+def create_main_keyboard() -> InlineKeyboardMarkup:
     settings = get_settings()
     buttons = [
         ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}')),
     ]
-
-    seen_urls = set()
-    for channel in referral_channels or []:
-        channel_url = channel.url.strip()
-        if not channel_url or channel_url in seen_urls:
-            continue
-
-        seen_urls.add(channel_url)
-        account_name = channel.account_name.strip() or channel.platform.strip()
-        buttons.append((f'🔗 {account_name[:48]}', channel_url))
-
-    if referral_channels:
-        buttons.append((
-            '🎁 Подтвердить подписки',
-            WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/referrals'),
-        ))
 
     buttons.extend([
         ('⭐ Отзывы', settings.reviews_channel_url),
@@ -134,14 +116,9 @@ async def start(message: Message, command: CommandObject):
 @router.callback_query(StartCallback.filter(F.action == 'continue'))
 @transaction(1)
 async def continue_to_start(callback: CallbackQuery):
-    user = await User.get_by_id(callback.from_user.id)
     await callback.message.edit_text(
         create_welcome_text(),
-        reply_markup=(
-            await _main_keyboard_for_user(user)
-            if user
-            else create_main_keyboard()
-        ),
+        reply_markup=create_main_keyboard(),
     )
     await callback.answer()
 

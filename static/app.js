@@ -385,7 +385,7 @@ async function copyReferralLink(button) {
     showToast('Реферальная ссылка скопирована');
 }
 
-async function copyReferralPlatformLink(button) {
+async function copyReferralChannelLink(button) {
     const link = button?.dataset.copyLink?.trim();
     if (!link) return showToast('Ссылка пока недоступна');
 
@@ -400,7 +400,7 @@ async function copyReferralPlatformLink(button) {
     button.__fyvessaCopyTimer = setTimeout(() => {
         if (button.isConnected) button.textContent = 'Скопировать ссылку';
     }, 1800);
-    showToast('Ссылка на площадку скопирована');
+    showToast('Ссылка на канал скопирована');
     tg?.HapticFeedback?.notificationOccurred('success');
 }
 

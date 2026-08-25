@@ -264,8 +264,7 @@ async def notify_referral_review(
     message_text = (
         '<b>Подписка ожидает ручной проверки</b>\n\n'
         f'Пользователь: <code>{user.id}</code>\n'
-        f'Площадка: {html.escape(channel.platform)} / '
-        f'{html.escape(channel.account_name)}\n'
+        f'Канал: {html.escape(channel.account_name)}\n'
         f'Ссылка: {html.escape(channel.url)}\n'
         f'{reward_details}'
     ).rstrip()
@@ -320,10 +319,10 @@ ADMIN_GROUPS = {
     ),
     'admin_content': (
         '🖼 Витрина и каналы',
-        'Рекламные карточки на главной и площадки для подписок.',
+        'Рекламные карточки на главной и каналы для подписок.',
         (
             ('🖼 Рекламные карточки', 'banners'),
-            ('🌐 Социальные сети', 'socials'),
+            ('🌐 Каналы', 'socials'),
         ),
     ),
     'admin_system': (
@@ -1044,6 +1043,32 @@ def _telegram_chat_id_from_url(value: str) -> str | None:
     return f'@{username}'
 
 
+def _telegram_chat_id_for_url(
+    value: str,
+    explicit_chat_id: str | None = None,
+) -> str | None:
+    parsed = urlsplit(value)
+    is_telegram_url = (
+        parsed.scheme.casefold() == 'https'
+        and (parsed.hostname or '').casefold() == 't.me'
+    )
+    if not is_telegram_url:
+        return None
+
+    inferred_chat_id = _telegram_chat_id_from_url(value)
+    if inferred_chat_id:
+        return inferred_chat_id
+
+    path = parsed.path.lstrip('/')
+    if path.startswith('+'):
+        if explicit_chat_id:
+            return explicit_chat_id
+        raise ValueError(
+            'Для ссылки https://t.me/+... обязательно укажите Telegram chat ID'
+        )
+    raise ValueError('В ссылке Telegram не указан username канала')
+
+
 def _banner_text(banner: Banner) -> str:
     image = html.escape(banner.image_url) if banner.image_url else 'без изображения'
     return (
@@ -1103,9 +1128,8 @@ def _social_text(channel: SocialChannel) -> str:
         ),
     ))
     return (
-        f'<b>Социальная сеть №{channel.id}</b>\n\n'
-        f'Площадка: <b>{html.escape(channel.platform)}</b>\n'
-        f'Аккаунт: <b>{html.escape(channel.account_name)}</b>\n'
+        f'<b>Канал №{channel.id}</b>\n\n'
+        f'Название: <b>{html.escape(channel.account_name)}</b>\n'
         f'Ссылка: {html.escape(channel.url)}\n'
         f'{reward_details}'
         f'Проверка: <b>{check_mode}</b>\n'
@@ -1131,7 +1155,7 @@ async def _show_socials(callback: CallbackQuery, page: int = 0) -> None:
     if not channels:
         return await _edit_message(
             callback,
-            '<b>Социальные сети</b>\n\nПлощадки пока не добавлены.',
+            '<b>Каналы</b>\n\nКаналы пока не добавлены.',
             inline_keyboard([
                 ('➕ Добавить', SocialActionCallback(action='add')),
                 ('🏠 Меню', AdminSectionCallback(section='menu')),
@@ -1172,8 +1196,7 @@ async def _referral_review_text(reward: ReferralReward) -> str:
         f'Подписывается: <code>{reward.invited_user_id}</code> '
         f'({html.escape(invited.username or "без username") if invited else "удалён"})\n'
         f'Пригласил: {referrer_text}\n'
-        f'Площадка: <b>{html.escape(channel.platform) if channel else "удалена"}</b> / '
-        f'{html.escape(channel.account_name) if channel else "—"}\n'
+        f'Канал: <b>{html.escape(channel.account_name) if channel else "удалён"}</b>\n'
         f'{reward_details}'
         f'Статус: <b>{reward.status}</b>'
     )
@@ -1211,7 +1234,7 @@ async def _show_coin_settings(callback: CallbackQuery) -> None:
     history = '\n'.join(
         f'• {transaction.created_at:%d.%m %H:%M} · '
         f'<code>{transaction.user_id}</code> · {transaction.amount:+} · '
-        f'{html.escape(transaction.reason)}'
+        f'{html.escape(transaction.display_reason)}'
         for transaction in transactions
     ) or '• Операций пока нет'
     await _edit_message(
@@ -1226,7 +1249,7 @@ async def _show_coin_settings(callback: CallbackQuery) -> None:
             ('✏️ Изменить процент', CoinSettingsCallback(action='percent')),
             ('± Ручная операция', CoinSettingsCallback(action='adjust')),
             ('📜 Вся история', CoinSettingsCallback(action='history')),
-            ('🌐 Социальные сети и награды', AdminSectionCallback(section='socials')),
+            ('🌐 Каналы и награды', AdminSectionCallback(section='socials')),
             ('🏠 Меню', AdminSectionCallback(section='menu')),
         ]),
     )
@@ -1291,7 +1314,7 @@ async def _show_coin_history(
             f'<b>#{transaction.id}</b> · {transaction.created_at:%d.%m.%Y %H:%M}\n'
             f'Пользователь <code>{transaction.user_id}</code>{admin_text}{order_text}\n'
             f'{transaction.amount:+} → баланс {transaction.balance_after}\n'
-            f'{html.escape(transaction.reason)}'
+            f'{html.escape(transaction.display_reason)}'
         )
 
     scope = f' пользователя <code>{user_id}</code>' if user_id else ''
@@ -2080,17 +2103,15 @@ async def banner_form(message: Message, state: FSMContext):
 
 def _social_prompt(channel: SocialChannel | None = None) -> str:
     return (
-        f'<b>{"Изменить" if channel else "Новая"} площадка</b>\n\n'
+        f'<b>{"Изменить" if channel else "Новый"} канал</b>\n\n'
         'Отправьте одной строкой:\n'
-        '<code>Telegram | Название канала | https://t.me/channel | 7 | 3</code>\n\n'
+        '<code>Название канала | https://t.me/channel | 7 | 3</code>\n\n'
         'Первое число — награда пригласившему, второе — самому подписавшемуся.\n\n'
-        'Для публичной ссылки <code>https://t.me/username</code> Telegram chat ID '
-        'автоматически станет <code>@username</code>. Чтобы указать другой chat ID, '
-        'добавьте его шестым полем. Для ссылки <code>https://t.me/+...</code> явный '
-        'chat ID обязателен.\n\n'
-        'Для Instagram, TikTok, YouTube и других площадок добавьте шестым '
-        'полем <code>-</code> — такие подписки подтверждаются администратором. '
-        'Для Telegram bot должен быть администратором канала.'
+        'Для ссылки <code>https://t.me/username</code> Telegram chat ID '
+        'автоматически станет <code>@username</code>. Для пригласительной ссылки '
+        '<code>https://t.me/+...</code> обязательно добавьте chat ID пятым полем.\n\n'
+        'Ссылки не на Telegram подтверждаются администратором. Для автоматической '
+        'проверки Telegram бот должен быть администратором канала.'
     )
 
 
@@ -2107,7 +2128,7 @@ async def social_action(
     )
     if callback_data.action in {'add', 'edit'}:
         if callback_data.action == 'edit' and not channel:
-            return await callback.answer('Площадка не найдена', show_alert=True)
+            return await callback.answer('Канал не найден', show_alert=True)
         await state.set_state(SocialForm.details)
         await state.update_data(
             channel_id=channel.id if channel and callback_data.action == 'edit' else 0,
@@ -2119,7 +2140,7 @@ async def social_action(
             _back_keyboard('socials', callback_data.page),
         )
     if not channel:
-        return await callback.answer('Площадка не найдена', show_alert=True)
+        return await callback.answer('Канал не найден', show_alert=True)
     if callback_data.action == 'toggle':
         channel.is_active = not channel.is_active
         channel.updated_at = datetime.now()
@@ -2136,44 +2157,25 @@ async def social_form(message: Message, state: FSMContext):
     channel = await SocialChannel.get_by_id(data.get('channel_id', 0))
     parts = [part.strip() for part in (message.text or '').split('|')]
     try:
-        if len(parts) not in {5, 6}:
-            raise ValueError('Нужно пять или шесть полей через |')
-        if len(parts) == 5:
-            platform, account_name, url, reward_text, last_field = parts
-            if (
-                last_field in {'', '-'}
-                or last_field.startswith('@')
-                or (last_field.startswith('-') and last_field[1:].isdigit())
-            ):
-                invitee_reward_text = str(channel.invitee_coin_reward if channel else 0)
-                telegram_chat_id = last_field
-            else:
-                invitee_reward_text = last_field
-                telegram_chat_id = ''
-        else:
-            (
-                platform,
-                account_name,
-                url,
-                reward_text,
-                invitee_reward_text,
-                telegram_chat_id,
-            ) = parts
-        if not platform or not account_name:
-            raise ValueError('Площадка и название аккаунта обязательны')
+        if len(parts) not in {4, 5}:
+            raise ValueError('Нужно четыре или пять полей через |')
+        account_name, url, reward_text, invitee_reward_text = parts[:4]
+        telegram_chat_id = parts[4] if len(parts) == 5 else ''
+        if not account_name:
+            raise ValueError('Название канала обязательно')
         url = _valid_url(url)
         coin_reward = whole_coin_reward(Decimal(reward_text.replace(',', '.')))
         invitee_coin_reward = whole_coin_reward(
             Decimal(invitee_reward_text.replace(',', '.'))
         )
 
-        telegram_chat_id = None if telegram_chat_id in {'', '-'} else telegram_chat_id
-        if platform.casefold() == 'telegram' and not telegram_chat_id:
-            telegram_chat_id = _telegram_chat_id_from_url(url)
-            if not telegram_chat_id:
-                raise ValueError(
-                    'Для ссылки без публичного username укажите @channel или chat ID'
-                )
+        explicit_telegram_chat_id = (
+            None if telegram_chat_id in {'', '-'} else telegram_chat_id
+        )
+        telegram_chat_id = _telegram_chat_id_for_url(
+            url,
+            explicit_telegram_chat_id,
+        )
     except (ValueError, InvalidOperation) as exc:
         return await message.answer(
             f'Не удалось сохранить: {html.escape(str(exc))}\n\n{_social_prompt()}',
@@ -2182,11 +2184,9 @@ async def social_form(message: Message, state: FSMContext):
 
     if not channel:
         channel = SocialChannel(
-            platform=platform,
             account_name=account_name,
             url=url,
         )
-    channel.platform = platform
     channel.account_name = account_name
     channel.url = url
     channel.coin_reward = coin_reward

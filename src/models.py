@@ -466,6 +466,21 @@ class CoinTransaction(SQLModel, table=True):
     balance_after: Decimal = Field(decimal_places=2)
     reason: str
 
+    @property
+    def display_reason(self) -> str:
+        """Hide the obsolete prefix in old referral transaction texts."""
+        if not self.social_channel_id:
+            return self.reason
+
+        prefix, separator, details = self.reason.partition(': ')
+        is_referral_reason = (
+            prefix == 'Награда за подписку'
+            or prefix.startswith('Подписка приглашённого ')
+        )
+        if separator and is_referral_reason and ' / ' in details:
+            return f'{prefix}: {details.split(" / ", 1)[1]}'
+        return self.reason
+
     @classmethod
     async def get_recent(
         cls,
@@ -548,7 +563,6 @@ class SocialChannel(SQLModel, table=True):
     id: int = Field(primary_key=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    platform: str = Field(index=True)
     account_name: str
     url: str
     coin_reward: Decimal = Field(default=Decimal('0'), decimal_places=2)
@@ -558,7 +572,7 @@ class SocialChannel(SQLModel, table=True):
 
     @property
     def supports_automatic_check(self) -> bool:
-        return self.platform.casefold() == 'telegram' and bool(self.telegram_chat_id)
+        return bool(self.telegram_chat_id)
 
     @classmethod
     async def get_by_id(cls, channel_id: int) -> Optional[Self]:

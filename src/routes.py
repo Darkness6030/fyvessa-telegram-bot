@@ -817,7 +817,7 @@ async def claim_referral_action(
 ) -> ReferralClaimResponse:
     channel = await SocialChannel.get_by_id(channel_id)
     if not channel or not channel.is_active:
-        raise HTTPException(status_code=404, detail='Социальная сеть отключена')
+        raise HTTPException(status_code=404, detail='Канал отключён')
     existing = await ReferralReward.get_for_user_channel(user.id, channel.id)
     was_in_review = bool(existing and existing.status == 'review')
     reward = await claim_referral_reward(user, channel)
