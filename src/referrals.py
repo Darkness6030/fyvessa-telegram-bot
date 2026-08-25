@@ -182,6 +182,7 @@ async def personal_referral_link(user_id: int) -> str:
 async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
     if not channel.telegram_chat_id:
         return False
+
     member = await get_bot().get_chat_member(channel.telegram_chat_id, user_id)
     if member.status in {
         ChatMemberStatus.CREATOR,
@@ -189,16 +190,20 @@ async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
         ChatMemberStatus.MEMBER,
     }:
         return True
+
     return member.status == ChatMemberStatus.RESTRICTED and bool(
         getattr(member, 'is_member', False),
     )
 
 
 async def initialize_referral_rewards(user: User) -> list[ReferralReward]:
-    if not user.referrer_id or user.referrer_id == user.id:
-        return []
-    if not await User.get_by_id(user.referrer_id):
-        return []
+    referrer_id = None
+    if (
+        user.referrer_id
+        and user.referrer_id != user.id
+        and await User.get_by_id(user.referrer_id)
+    ):
+        referrer_id = user.referrer_id
 
     rewards = []
     for channel in await SocialChannel.get_active():
@@ -218,7 +223,7 @@ async def initialize_referral_rewards(user: User) -> list[ReferralReward]:
 
         reward = ReferralReward(
             invited_user_id=user.id,
-            referrer_id=user.referrer_id,
+            referrer_id=referrer_id,
             social_channel_id=channel.id,
             status=status,
         ).add()
@@ -236,17 +241,23 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
         raise ValueError('Пользователь уже был подписан до участия в программе')
 
     invited_user = await User.get_by_id(reward.invited_user_id)
-    referrer = await User.get_by_id(reward.referrer_id)
+    referrer = (
+        await User.get_by_id(reward.referrer_id)
+        if reward.referrer_id
+        else None
+    )
     channel = await SocialChannel.get_by_id(reward.social_channel_id)
-    if not invited_user or not referrer or not channel:
+    if not invited_user or not channel or (reward.referrer_id and not referrer):
         raise ValueError('Реферальные данные больше недоступны')
 
-    if invited_user.id == referrer.id:
+    if referrer and invited_user.id == referrer.id:
         raise ValueError('Нельзя пригласить самого себя')
 
     rewards_were_snapshotted = reward.verified_at is not None
     reward_amount = money(
-        reward.reward_amount if rewards_were_snapshotted else channel.coin_reward
+        (reward.reward_amount if rewards_were_snapshotted else channel.coin_reward)
+        if referrer
+        else Decimal('0')
     )
     invitee_reward_amount = money(
         reward.invitee_reward_amount
@@ -263,7 +274,7 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
     reward.add()
     await session_context.get().flush()
 
-    if reward_amount:
+    if referrer and reward_amount:
         referrer.coin_balance = money_sum(referrer.coin_balance, reward_amount)
         referrer.updated_at = current_time
         referrer.add()
@@ -297,7 +308,7 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
             ),
         ).add()
 
-    if invited_user.referral_discount_awarded_at is None:
+    if referrer and invited_user.referral_discount_awarded_at is None:
         referrer.personal_discount_percent = min(
             MAX_REFERRAL_DISCOUNT,
             money(referrer.personal_discount_percent + REFERRAL_DISCOUNT_STEP),
@@ -310,9 +321,10 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
         channel,
         reward_amount,
         invitee_reward_amount,
-        referrer.personal_discount_percent,
+        referrer.personal_discount_percent if referrer else Decimal('0'),
     )
-    await send_message(referrer.id, referrer_message)
+    if referrer:
+        await send_message(referrer.id, referrer_message)
     await send_message(invited_user.id, invitee_message)
     return True
 
@@ -321,22 +333,24 @@ async def claim_referral_reward(
     user: User,
     channel: SocialChannel,
 ) -> ReferralReward:
-    if not user.referrer_id:
-        raise HTTPException(status_code=409, detail='Вы пришли без реферальной ссылки')
     rewards = await initialize_referral_rewards(user)
     reward = next(
         (item for item in rewards if item.social_channel_id == channel.id),
         None,
     )
+
     if not reward:
         raise HTTPException(status_code=404, detail='Реферальное действие не найдено')
+
     if reward.status == 'approved':
         return reward
+
     if reward.status == 'preexisting':
         raise HTTPException(
             status_code=409,
             detail='Подписка существовала до открытия реферального задания',
         )
+
     if reward.status == 'review':
         return reward
 
@@ -348,19 +362,24 @@ async def claim_referral_reward(
                 status_code=503,
                 detail='Проверка Telegram временно недоступна',
             ) from exc
+
         if not is_member:
             raise HTTPException(
                 status_code=409,
                 detail='Подписка пока не найдена. Подпишитесь и повторите проверку',
             )
-        reward.reward_amount = money(channel.coin_reward)
+        reward.reward_amount = money(
+            channel.coin_reward if reward.referrer_id else Decimal('0')
+        )
         reward.invitee_reward_amount = money(channel.invitee_coin_reward)
         reward.verified_at = datetime.now()
         reward.add()
         await approve_referral_reward(reward)
     else:
         reward.status = 'review'
-        reward.reward_amount = money(channel.coin_reward)
+        reward.reward_amount = money(
+            channel.coin_reward if reward.referrer_id else Decimal('0')
+        )
         reward.invitee_reward_amount = money(channel.invitee_coin_reward)
         reward.verified_at = datetime.now()
         reward.add()

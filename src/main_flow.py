@@ -99,7 +99,7 @@ def create_main_keyboard(
 
 
 async def _main_keyboard_for_user(user: User) -> InlineKeyboardMarkup:
-    channels = await SocialChannel.get_active() if user.referrer_id else []
+    channels = await SocialChannel.get_active()
     return create_main_keyboard(channels)
 
 

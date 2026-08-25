@@ -595,7 +595,8 @@ class ReferralReward(SQLModel, table=True):
         foreign_key='user.id',
         index=True,
     )
-    referrer_id: int = Field(
+    referrer_id: Optional[int] = Field(
+        default=None,
         sa_type=BigInteger,
         foreign_key='user.id',
         index=True,

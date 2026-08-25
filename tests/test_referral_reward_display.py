@@ -74,6 +74,35 @@ class ReferralRewardTemplateTests(unittest.TestCase):
         self.assertIn('За подписку: +3', rendered)
         self.assertIn('Вам начислено 3 коинов', rendered)
 
+    def test_claim_action_is_available_without_referrer(self):
+        channel = SimpleNamespace(
+            id=1,
+            platform='Telegram',
+            account_name='Fyvessa',
+            url='https://t.me/fyvessa',
+            coin_reward=Decimal('5'),
+            invitee_coin_reward=Decimal('3'),
+            supports_automatic_check=True,
+        )
+        reward = SimpleNamespace(
+            status='pending',
+            invitee_reward_amount=Decimal('0'),
+        )
+
+        rendered = self.template.render(
+            user=SimpleNamespace(referrer_id=None),
+            referral_link='https://t.me/bot?start=1',
+            channels=[channel],
+            rewards_by_channel={channel.id: reward},
+            invited_count=0,
+            approved_count=0,
+            earned_coins=Decimal('0'),
+            coin_transactions=[],
+        )
+
+        self.assertIn('claimReferralReward(1, this)', rendered)
+        self.assertIn('За подписку: +3', rendered)
+
 
 class ReferralApprovalMessageTests(unittest.TestCase):
     channel = SimpleNamespace(platform='Telegram', account_name='Fyvessa & Co')

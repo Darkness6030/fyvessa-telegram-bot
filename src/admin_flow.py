@@ -1143,8 +1143,14 @@ async def _show_socials(callback: CallbackQuery, page: int = 0) -> None:
 
 async def _referral_review_text(reward: ReferralReward) -> str:
     invited = await User.get_by_id(reward.invited_user_id)
-    referrer = await User.get_by_id(reward.referrer_id)
+    referrer = await User.get_by_id(reward.referrer_id) if reward.referrer_id else None
     channel = await SocialChannel.get_by_id(reward.social_channel_id)
+    referrer_text = (
+        f'<code>{reward.referrer_id}</code> '
+        f'({html.escape(referrer.username or "без username") if referrer else "удалён"})'
+        if reward.referrer_id
+        else 'нет'
+    )
     reward_details = ''.join((
         (
             f'Награда пригласившему: <b>{reward.reward_amount} коинов</b>\n'
@@ -1161,8 +1167,7 @@ async def _referral_review_text(reward: ReferralReward) -> str:
         '<b>Реферальная проверка</b>\n\n'
         f'Подписывается: <code>{reward.invited_user_id}</code> '
         f'({html.escape(invited.username or "без username") if invited else "удалён"})\n'
-        f'Пригласил: <code>{reward.referrer_id}</code> '
-        f'({html.escape(referrer.username or "без username") if referrer else "удалён"})\n'
+        f'Пригласил: {referrer_text}\n'
         f'Площадка: <b>{html.escape(channel.platform) if channel else "удалена"}</b> / '
         f'{html.escape(channel.account_name) if channel else "—"}\n'
         f'{reward_details}'
