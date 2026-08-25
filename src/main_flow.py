@@ -16,7 +16,7 @@ from rewire import config, simple_plugin
 from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
-from src.models import SocialChannel, User
+from src.models import User
 from src.referrals import award_referral_activation, initialize_referral_rewards
 from src.settings import get_settings
 
@@ -81,11 +81,6 @@ def create_main_keyboard() -> InlineKeyboardMarkup:
     return inline_keyboard(buttons)
 
 
-async def _main_keyboard_for_user(user: User) -> InlineKeyboardMarkup:
-    channels = await SocialChannel.get_active()
-    return create_main_keyboard(channels)
-
-
 @router.message(CommandStart())
 @transaction(1)
 async def start(message: Message, command: CommandObject):
@@ -109,7 +104,7 @@ async def start(message: Message, command: CommandObject):
     await initialize_referral_rewards(user)
     await message.answer(
         create_welcome_text(),
-        reply_markup=await _main_keyboard_for_user(user),
+        reply_markup=create_main_keyboard(),
     )
 
 
