@@ -68,16 +68,19 @@ function initBannerCarousels(root = document) {
         if (!slider || slides.length < 1 || slider.__fyvessaBannerReady) return;
         slider.__fyvessaBannerReady = true;
 
-        const activeIndex = () => Math.max(
-            0,
-            Math.min(slides.length - 1, Math.round(slider.scrollLeft / (slider.clientWidth || 1))),
-        );
+        const slidePosition = (slide) => slide.offsetLeft - slides[0].offsetLeft;
+        const activeIndex = () => slides.reduce((closest, slide, index) => (
+            Math.abs(slidePosition(slide) - slider.scrollLeft)
+                < Math.abs(slidePosition(slides[closest]) - slider.scrollLeft)
+                ? index
+                : closest
+        ), 0);
         const updateDots = () => {
             const current = activeIndex();
             dots.forEach((dot, index) => dot.classList.toggle('is-active', index === current));
         };
         const goTo = (index) => slider.scrollTo({
-            left: slider.clientWidth * ((index + slides.length) % slides.length),
+            left: slidePosition(slides[(index + slides.length) % slides.length]),
             behavior: 'smooth',
         });
         const stop = () => clearInterval(slider.__fyvessaBannerTimer);

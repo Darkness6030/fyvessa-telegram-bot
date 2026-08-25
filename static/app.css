@@ -27,7 +27,8 @@ html[data-theme="dark"] .theme-icon-to-light { display: inline; }
 .hero-orb { filter: blur(.2px); box-shadow: -60px -40px 120px rgba(237,105,75,.24); }
 .product-slider { scroll-behavior: smooth; }
 .banner-slider {
-    background: var(--tg-bg);
+    background: transparent;
+    gap: .5rem;
     isolation: isolate;
     scroll-behavior: smooth;
     overscroll-behavior-x: contain;
