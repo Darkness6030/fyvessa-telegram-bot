@@ -37,15 +37,7 @@ from src.models import (
 )
 from src.orders import cancel_order, confirm_payment, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
 from src.payouts import current_partner_accruals, mark_payout_paid, next_payout_cutoff
-from src.referrals import (
-    adjust_user_coins,
-    approve_referral_reward,
-    get_referral_activation_reward,
-    get_purchase_coin_percent,
-    reject_referral_reward,
-    set_referral_activation_reward,
-    set_purchase_coin_percent,
-)
+from src.referrals import (adjust_user_coins, approve_referral_reward, get_purchase_coin_percent, get_referral_activation_reward, reject_referral_reward, set_purchase_coin_percent, set_referral_activation_reward)
 from src.settings import SettingsValidationError, sync_settings
 
 
@@ -1038,6 +1030,18 @@ def _valid_url(value: str, allow_local: bool = False) -> str:
     if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
         raise ValueError('Ссылка должна начинаться с https://')
     return value
+
+
+def _telegram_chat_id_from_url(value: str) -> str | None:
+    parsed = urlsplit(value)
+    if parsed.scheme.casefold() != 'https' or (parsed.hostname or '').casefold() != 't.me':
+        return None
+
+    path = parsed.path[1:] if parsed.path.startswith('/') else parsed.path
+    username = path.split('/', 1)[0]
+    if not username or username.startswith('+'):
+        return None
+    return f'@{username}'
 
 
 def _banner_text(banner: Banner) -> str:
@@ -2078,10 +2082,14 @@ def _social_prompt(channel: SocialChannel | None = None) -> str:
     return (
         f'<b>{"Изменить" if channel else "Новая"} площадка</b>\n\n'
         'Отправьте одной строкой:\n'
-        '<code>Telegram | Название канала | https://t.me/channel | 7 | 3 | @channel</code>\n\n'
+        '<code>Telegram | Название канала | https://t.me/channel | 7 | 3</code>\n\n'
         'Первое число — награда пригласившему, второе — самому подписавшемуся.\n\n'
-        'Для Instagram, TikTok, YouTube и других площадок вместо последнего '
-        'поля укажите <code>-</code> — такие подписки подтверждаются администратором. '
+        'Для публичной ссылки <code>https://t.me/username</code> Telegram chat ID '
+        'автоматически станет <code>@username</code>. Чтобы указать другой chat ID, '
+        'добавьте его шестым полем. Для ссылки <code>https://t.me/+...</code> явный '
+        'chat ID обязателен.\n\n'
+        'Для Instagram, TikTok, YouTube и других площадок добавьте шестым '
+        'полем <code>-</code> — такие подписки подтверждаются администратором. '
         'Для Telegram bot должен быть администратором канала.'
     )
 
@@ -2129,10 +2137,19 @@ async def social_form(message: Message, state: FSMContext):
     parts = [part.strip() for part in (message.text or '').split('|')]
     try:
         if len(parts) not in {5, 6}:
-            raise ValueError('Нужно шесть полей через |')
+            raise ValueError('Нужно пять или шесть полей через |')
         if len(parts) == 5:
-            platform, account_name, url, reward_text, telegram_chat_id = parts
-            invitee_reward_text = str(channel.invitee_coin_reward if channel else 0)
+            platform, account_name, url, reward_text, last_field = parts
+            if (
+                last_field in {'', '-'}
+                or last_field.startswith('@')
+                or (last_field.startswith('-') and last_field[1:].isdigit())
+            ):
+                invitee_reward_text = str(channel.invitee_coin_reward if channel else 0)
+                telegram_chat_id = last_field
+            else:
+                invitee_reward_text = last_field
+                telegram_chat_id = ''
         else:
             (
                 platform,
@@ -2149,9 +2166,14 @@ async def social_form(message: Message, state: FSMContext):
         invitee_coin_reward = whole_coin_reward(
             Decimal(invitee_reward_text.replace(',', '.'))
         )
-        telegram_chat_id = None if telegram_chat_id == '-' else telegram_chat_id
+
+        telegram_chat_id = None if telegram_chat_id in {'', '-'} else telegram_chat_id
         if platform.casefold() == 'telegram' and not telegram_chat_id:
-            raise ValueError('Для автоматической проверки Telegram укажите @channel или chat ID')
+            telegram_chat_id = _telegram_chat_id_from_url(url)
+            if not telegram_chat_id:
+                raise ValueError(
+                    'Для ссылки без публичного username укажите @channel или chat ID'
+                )
     except (ValueError, InvalidOperation) as exc:
         return await message.answer(
             f'Не удалось сохранить: {html.escape(str(exc))}\n\n{_social_prompt()}',

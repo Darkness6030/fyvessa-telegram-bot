@@ -491,10 +491,10 @@ async def cart_fragment(request: Request, user: RequestUser) -> HTMLResponse:
         product_id
         for product_id, availability in latest_availability_by_product.items()
         if availability.status == 'available'
-        and (
-            (expiration := availability_confirmation_expires_at(availability)) is None
-            or expiration <= current_time
-        )
+           and (
+               (expiration := availability_confirmation_expires_at(availability)) is None
+               or expiration <= current_time
+           )
     }
 
     return templates.TemplateResponse(
@@ -568,9 +568,9 @@ async def referrals_fragment(request: Request, user: RequestUser) -> HTMLRespons
             'earned_coins': (
                 sum((item.reward_amount for item in approved_rewards), Decimal('0'))
                 + sum(
-                    (item.invitee_reward_amount for item in approved_invitee_rewards),
-                    Decimal('0'),
-                )
+                (item.invitee_reward_amount for item in approved_invitee_rewards),
+                Decimal('0'),
+            )
             ),
             'coin_transactions': await CoinTransaction.get_recent(user_id=user.id, limit=20),
         },

@@ -55,6 +55,7 @@ WELCOME_TEXT = (
     'Ваш стиль — наша эстетика.'
 )
 
+
 def create_welcome_text() -> str:
     reviews_url = html.escape(get_settings().reviews_channel_url, quote=True)
     reviews_link = (

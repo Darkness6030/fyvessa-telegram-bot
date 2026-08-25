@@ -191,9 +191,7 @@ async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
     }:
         return True
 
-    return member.status == ChatMemberStatus.RESTRICTED and bool(
-        getattr(member, 'is_member', False),
-    )
+    return member.status == ChatMemberStatus.RESTRICTED and member.is_member
 
 
 async def initialize_referral_rewards(user: User) -> list[ReferralReward]:
