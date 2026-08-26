@@ -385,25 +385,6 @@ async function copyReferralLink(button) {
     showToast('Реферальная ссылка скопирована');
 }
 
-async function copyReferralChannelLink(button) {
-    const link = button?.dataset.copyLink?.trim();
-    if (!link) return showToast('Ссылка пока недоступна');
-
-    try {
-        await writeClipboardText(link);
-    } catch (_) {
-        return showToast('Не удалось скопировать ссылку');
-    }
-
-    button.textContent = 'Скопировано ✓';
-    clearTimeout(button.__fyvessaCopyTimer);
-    button.__fyvessaCopyTimer = setTimeout(() => {
-        if (button.isConnected) button.textContent = 'Скопировать ссылку';
-    }, 1800);
-    showToast('Ссылка на канал скопирована');
-    tg?.HapticFeedback?.notificationOccurred('success');
-}
-
 async function copyPaymentDetail(button) {
     const value = button.querySelector('[data-payment-copy-value]')?.textContent?.trim();
     if (!value) return showToast('Реквизиты пока недоступны');
