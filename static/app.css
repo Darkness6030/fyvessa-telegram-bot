@@ -28,17 +28,20 @@ html[data-theme="dark"] .theme-icon-to-light { display: inline; }
 .product-slider { scroll-behavior: smooth; }
 .banner-slider {
     background: transparent;
+    clip-path: inset(0 round 1rem);
     gap: .5rem;
     isolation: isolate;
+    overflow-y: hidden;
     scroll-behavior: smooth;
     overscroll-behavior-x: contain;
 }
 .banner-slide {
-    background: var(--tg-bg);
+    background: transparent;
     clip-path: inset(0 round 1rem);
+    overflow: hidden;
 }
 .banner-image {
-    background: var(--tg-bg);
+    background: transparent;
     border-radius: inherit;
 }
 .banner-dot { transition: width .25s var(--ease-out), background-color .25s ease; }
