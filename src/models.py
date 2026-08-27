@@ -176,13 +176,18 @@ class User(SQLModel, table=True):
     ) -> Self:
         user = await cls.get_by_id(user_id)
         if not user:
-            return cls(
+            user = cls(
                 id=user_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
                 referrer_id=referrer_id,
             ).add()
+            # Models only contain foreign-key IDs, without ORM relationships,
+            # so SQLAlchemy cannot infer that User must be inserted before
+            # dependent objects added later in the same transaction.
+            await session_context.get().flush()
+            return user
 
         user.username = username
         user.updated_at = datetime.now()
