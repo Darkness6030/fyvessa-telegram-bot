@@ -1,4 +1,5 @@
 import html
+from datetime import datetime
 
 from aiogram import Dispatcher, F, Router
 from aiogram.enums import ChatType
@@ -7,6 +8,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.filters.command import CommandObject
 from aiogram.types import (
     CallbackQuery,
+    ChatJoinRequest,
     InlineKeyboardMarkup,
     Message,
     WebAppInfo,
@@ -16,7 +18,7 @@ from rewire import config, simple_plugin
 from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
-from src.models import User
+from src.models import SocialChannel, TelegramJoinRequest, User
 from src.referrals import award_referral_activation, initialize_referral_rewards
 from src.settings import get_settings
 
@@ -126,6 +128,30 @@ async def catalog(message: Message):
             ('🛒 Каталог', WebAppInfo(url=f'{Config.mini_app_url.rstrip('/')}/catalog')),
         ]),
     )
+
+
+@router.chat_join_request()
+@transaction(1)
+async def remember_chat_join_request(request: ChatJoinRequest):
+    """Remember pending requests, which getChatMember reports as `left`."""
+    chat_id = str(request.chat.id)
+    username = f'@{request.chat.username}'.lower() if request.chat.username else None
+    for channel in await SocialChannel.get_active():
+        configured_chat_id = (channel.telegram_chat_id or '').strip().lower()
+        if configured_chat_id not in {chat_id, username}:
+            continue
+        existing = await TelegramJoinRequest.get_for_user_channel(
+            request.from_user.id,
+            channel.id,
+        )
+        if existing:
+            existing.requested_at = datetime.now()
+            existing.add()
+        else:
+            TelegramJoinRequest(
+                social_channel_id=channel.id,
+                user_id=request.from_user.id,
+            ).add()
 
 
 @plugin.setup()

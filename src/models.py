@@ -592,6 +592,33 @@ class SocialChannel(SQLModel, table=True):
         )
 
 
+class TelegramJoinRequest(SQLModel, table=True):
+    __table_args__ = (
+        Index(
+            'uq_telegramjoinrequest_channel_user',
+            'social_channel_id',
+            'user_id',
+            unique=True,
+        ),
+    )
+
+    id: int = Field(primary_key=True)
+    social_channel_id: int = Field(foreign_key='socialchannel.id', index=True)
+    user_id: int = Field(sa_type=BigInteger, index=True)
+    requested_at: datetime = Field(default_factory=datetime.now)
+
+    @classmethod
+    async def get_for_user_channel(
+        cls,
+        user_id: int,
+        social_channel_id: int,
+    ) -> Optional[Self]:
+        return await cls.select().filter_by(
+            user_id=user_id,
+            social_channel_id=social_channel_id,
+        ).first()
+
+
 class ReferralReward(SQLModel, table=True):
     __table_args__ = (
         Index(

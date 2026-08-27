@@ -15,6 +15,7 @@ from src.models import (
     Order,
     ReferralReward,
     SocialChannel,
+    TelegramJoinRequest,
     User,
 )
 from src.pricing import money, money_sum
@@ -183,7 +184,13 @@ async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
     if not channel.telegram_chat_id:
         return False
 
-    member = await get_bot().get_chat_member(channel.telegram_chat_id, user_id)
+    join_request = await TelegramJoinRequest.get_for_user_channel(user_id, channel.id)
+    try:
+        member = await get_bot().get_chat_member(channel.telegram_chat_id, user_id)
+    except TelegramAPIError:
+        if join_request:
+            return True
+        raise
     if member.status in {
         ChatMemberStatus.CREATOR,
         ChatMemberStatus.ADMINISTRATOR,
@@ -191,7 +198,9 @@ async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
     }:
         return True
 
-    return member.status == ChatMemberStatus.RESTRICTED and member.is_member
+    return (
+        member.status == ChatMemberStatus.RESTRICTED and member.is_member
+    ) or join_request is not None
 
 
 async def initialize_referral_rewards(user: User) -> list[ReferralReward]:
