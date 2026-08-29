@@ -13,6 +13,7 @@ from src.models import (
     CoinTransaction,
     Order,
     OrderItem,
+    PartnerPayout,
     Product,
     Promocode,
     User,
@@ -390,4 +391,47 @@ async def update_shipping_status(order: Order, status: str) -> bool:
         order.status = 'paid'
         order.delivered_at = None
     order.add()
+    return True
+
+
+async def delete_completed_order(order: Order) -> bool:
+    """Remove a completed order and undo every statistic it contributed to."""
+    order = await Order.get_by_id_for_update(order.id)
+    if not order:
+        return False
+    if order.status != 'completed' or order.payment_status != 'paid':
+        raise ValueError('Удалить можно только завершённый оплаченный заказ')
+
+    order_items = await OrderItem.get_for_order(order.id)
+    for item in order_items:
+        product = await Product.get_by_id(item.product_id)
+        if product:
+            product.purchases_count = max(0, product.purchases_count - item.quantity)
+            product.add()
+
+    user = await User.get_by_id(order.user_id)
+    if user:
+        # Return the balance to the state it would have had without this order:
+        # refund coins spent at checkout and remove coins awarded for the purchase.
+        user.coin_balance = money(
+            user.coin_balance + order.coins_used - order.purchase_coins_awarded
+        )
+        user.updated_at = datetime.now()
+        user.add()
+
+    transactions = await CoinTransaction.select().filter_by(order_id=order.id).all()
+    for coin_transaction in transactions:
+        await coin_transaction.delete()
+
+    if order.partner_payout_id:
+        payout = await PartnerPayout.get_by_id_for_update(order.partner_payout_id)
+        if payout:
+            payout.orders_count = max(0, payout.orders_count - 1)
+            payout.orders_total = money(max(Decimal('0'), payout.orders_total - order.paid_total))
+            payout.payout_amount = money(max(Decimal('0'), payout.payout_amount - order.partner_reward))
+            payout.add()
+
+    for item in order_items:
+        await item.delete()
+    await order.delete()
     return True

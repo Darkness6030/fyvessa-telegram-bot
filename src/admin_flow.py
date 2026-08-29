@@ -35,7 +35,7 @@ from src.models import (
     SocialChannel,
     User,
 )
-from src.orders import cancel_order, confirm_payment, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
+from src.orders import cancel_order, confirm_payment, delete_completed_order, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
 from src.payouts import current_partner_accruals, mark_payout_paid, next_payout_cutoff
 from src.referrals import (adjust_user_coins, approve_referral_reward, get_purchase_coin_percent, get_referral_activation_reward, reject_referral_reward, set_purchase_coin_percent, set_referral_activation_reward)
 from src.settings import SettingsValidationError, sync_settings
@@ -725,6 +725,12 @@ def _order_keyboard(order: Order, user_id: int = 0, page: int = 0, total: int = 
             OrderActionCallback(
                 order_id=order.id, action='cancel',
             ),
+        ))
+
+    if order.status == 'completed' and order.payment_status == 'paid':
+        buttons.append((
+            '🗑 Отменить оплату и удалить',
+            OrderActionCallback(order_id=order.id, action='delete_prompt'),
         ))
 
     next_shipping_status = {
@@ -1643,6 +1649,40 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
     order = await Order.get_by_id(callback_data.order_id)
     if not order:
         return await callback.answer('Заказ не найден', show_alert=True)
+
+    if callback_data.action == 'delete_prompt':
+        await _edit_message(
+            callback,
+            _order_text(order, await User.get_by_id(order.user_id))
+            + '\n\n⚠️ <b>Заказ будет удалён безвозвратно.</b> Его сумма исчезнет '
+              'из статистики, а начисления и счётчики покупок будут отменены.',
+            inline_keyboard([
+                (
+                    'Да, удалить целиком',
+                    OrderActionCallback(order_id=order.id, action='delete'),
+                ),
+                ('← Не удалять', AdminSectionCallback(section='orders')),
+            ]),
+        )
+        return await callback.answer()
+
+    if callback_data.action == 'delete':
+        try:
+            await delete_completed_order(order)
+        except ValueError as exc:
+            return await callback.answer(str(exc), show_alert=True)
+
+        orders = await Order.get_recent()
+        if orders:
+            next_order = orders[0]
+            await _edit_message(
+                callback,
+                _order_text(next_order, await User.get_by_id(next_order.user_id)),
+                _order_keyboard(next_order, page=0, total=len(orders)),
+            )
+        else:
+            await _edit_message(callback, 'Заказов пока нет.', _back_keyboard())
+        return await callback.answer('Заказ удалён из базы и статистики')
 
     try:
         has_changed = await _apply_order_action(
