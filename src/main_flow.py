@@ -14,7 +14,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 from pydantic import BaseModel
-from rewire import config, simple_plugin
+from rewire import config, logger, simple_plugin
 from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
@@ -136,14 +136,18 @@ async def remember_chat_join_request(request: ChatJoinRequest):
     """Remember pending requests, which getChatMember reports as `left`."""
     chat_id = str(request.chat.id)
     username = f'@{request.chat.username}'.lower() if request.chat.username else None
+
+    logger.debug(f'chat_id: {chat_id}, username: {username}')
     for channel in await SocialChannel.get_active():
         configured_chat_id = (channel.telegram_chat_id or '').strip().lower()
         if configured_chat_id not in {chat_id, username}:
             continue
+
         existing = await TelegramJoinRequest.get_for_user_channel(
             request.from_user.id,
             channel.id,
         )
+
         if existing:
             existing.requested_at = datetime.now()
             existing.add()

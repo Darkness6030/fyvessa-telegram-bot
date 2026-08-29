@@ -191,6 +191,7 @@ async def _telegram_member(channel: SocialChannel, user_id: int) -> bool:
         if join_request:
             return True
         raise
+
     if member.status in {
         ChatMemberStatus.CREATOR,
         ChatMemberStatus.ADMINISTRATOR,
@@ -372,9 +373,11 @@ async def claim_referral_reward(
                 status_code=409,
                 detail='Подписка пока не найдена. Подпишитесь и повторите проверку',
             )
+
         reward.reward_amount = money(
             channel.coin_reward if reward.referrer_id else Decimal('0')
         )
+
         reward.invitee_reward_amount = money(channel.invitee_coin_reward)
         reward.verified_at = datetime.now()
         reward.add()
