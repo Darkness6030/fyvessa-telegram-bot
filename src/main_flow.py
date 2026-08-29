@@ -134,13 +134,18 @@ async def catalog(message: Message):
 @transaction(1)
 async def remember_chat_join_request(request: ChatJoinRequest):
     """Remember pending requests, which getChatMember reports as `left`."""
-    chat_id = str(request.chat.id)
-    username = f'@{request.chat.username}'.lower() if request.chat.username else None
+    chat_ids = {
+        str(request.chat.id),
+        str(request.chat.shifted_id),
+    }
 
-    logger.debug(f'chat_id: {chat_id}, username: {username}')
+    if request.chat.username:
+        chat_ids.add(f'@{request.chat.username}'.lower())
+
+    logger.info(f'chat_ids: {chat_ids}')
     for channel in await SocialChannel.get_active():
         configured_chat_id = (channel.telegram_chat_id or '').strip().lower()
-        if configured_chat_id not in {chat_id, username}:
+        if configured_chat_id not in chat_ids:
             continue
 
         existing = await TelegramJoinRequest.get_for_user_channel(
