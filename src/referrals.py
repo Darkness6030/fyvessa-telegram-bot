@@ -23,8 +23,6 @@ from src.pricing import money, money_sum
 PURCHASE_COIN_PERCENT_KEY = 'purchase_coin_percent'
 REFERRAL_ACTIVATION_REWARD_KEY = 'referral_activation_coin_reward'
 DEFAULT_REFERRAL_ACTIVATION_REWARD = Decimal('5')
-MAX_REFERRAL_DISCOUNT = Decimal('10')
-REFERRAL_DISCOUNT_STEP = Decimal('1')
 _bot_username = ''
 
 
@@ -32,7 +30,6 @@ def _approval_messages(
     channel: SocialChannel,
     reward_amount: Decimal,
     invitee_reward_amount: Decimal,
-    personal_discount_percent: Decimal,
 ) -> tuple[str, str]:
     referrer_message = (
         (
@@ -41,11 +38,10 @@ def _approval_messages(
             else '<b>Подписка приглашённого подтверждена</b> 🎉\n\n'
         )
         + (
-            f'{reward_amount} коинов за подтверждённую подписку приглашённого.\n'
+            f'{reward_amount} коинов за подтверждённую подписку приглашённого.'
             if reward_amount
             else ''
         )
-        + f'Персональная скидка: {personal_discount_percent}%.'
     )
     invitee_message = (
         '<b>Подписка подтверждена</b> 🎉\n\n'
@@ -313,20 +309,10 @@ async def approve_referral_reward(reward: ReferralReward, admin_id: int | None =
             reason=f'Награда за подписку: {channel.account_name}',
         ).add()
 
-    if referrer and invited_user.referral_discount_awarded_at is None:
-        referrer.personal_discount_percent = min(
-            MAX_REFERRAL_DISCOUNT,
-            money(referrer.personal_discount_percent + REFERRAL_DISCOUNT_STEP),
-        )
-        referrer.updated_at = current_time
-        referrer.add()
-        invited_user.referral_discount_awarded_at = current_time
-        invited_user.add()
     referrer_message, invitee_message = _approval_messages(
         channel,
         reward_amount,
         invitee_reward_amount,
-        referrer.personal_discount_percent if referrer else Decimal('0'),
     )
     if referrer:
         await send_message(referrer.id, referrer_message)

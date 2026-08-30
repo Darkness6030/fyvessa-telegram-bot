@@ -29,9 +29,6 @@
     {% if order.product_discount_total %}
     <div class="flex justify-between text-black/55"><span>Скидка товаров</span><span>−{{ "%.0f"|format(order.product_discount_total) }} ₽</span></div>
     {% endif %}
-    {% if order.personal_discount_percent %}
-    <div class="flex justify-between text-black/55"><span>Персональная скидка</span><span>{{ order.personal_discount_percent }}%</span></div>
-    {% endif %}
     {% if order.promo_discount_percent %}
     <div class="flex justify-between text-black/55"><span>Промокод</span><span>{{ order.promo_discount_percent }}%</span></div>
     {% endif %}

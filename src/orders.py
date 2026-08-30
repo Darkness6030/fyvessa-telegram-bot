@@ -394,32 +394,32 @@ async def update_shipping_status(order: Order, status: str) -> bool:
     return True
 
 
-async def delete_completed_order(order: Order) -> bool:
-    """Remove a completed order and undo every statistic it contributed to."""
+async def delete_order(order: Order) -> bool:
+    """Remove an order in any status and undo every statistic it contributed to."""
     order = await Order.get_by_id_for_update(order.id)
     if not order:
         return False
-    if order.status != 'completed' or order.payment_status != 'paid':
-        raise ValueError('Удалить можно только завершённый оплаченный заказ')
 
     order_items = await OrderItem.get_for_order(order.id)
-    for item in order_items:
-        product = await Product.get_by_id(item.product_id)
-        if product:
-            product.purchases_count = max(0, product.purchases_count - item.quantity)
-            product.add()
+    if order.payment_status == 'paid':
+        for item in order_items:
+            product = await Product.get_by_id(item.product_id)
+            if product:
+                product.purchases_count = max(0, product.purchases_count - item.quantity)
+                product.add()
 
+    transactions = await CoinTransaction.select().filter_by(order_id=order.id).all()
     user = await User.get_by_id(order.user_id)
-    if user:
-        # Return the balance to the state it would have had without this order:
-        # refund coins spent at checkout and remove coins awarded for the purchase.
-        user.coin_balance = money(
-            user.coin_balance + order.coins_used - order.purchase_coins_awarded
+    if user and transactions:
+        # Reverse the exact ledger effect. This covers checkout spending, purchase
+        # rewards, and refunds already made for cancelled orders without duplication.
+        transaction_total = sum(
+            (transaction.amount for transaction in transactions), Decimal('0')
         )
+        user.coin_balance = money(user.coin_balance - transaction_total)
         user.updated_at = datetime.now()
         user.add()
 
-    transactions = await CoinTransaction.select().filter_by(order_id=order.id).all()
     for coin_transaction in transactions:
         await coin_transaction.delete()
 

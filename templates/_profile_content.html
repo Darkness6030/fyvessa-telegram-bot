@@ -16,14 +16,10 @@
         <p class="mt-1 truncate text-sm text-white/50">{{ '@' ~ user.username if user.username else 'Telegram ID ' ~ user.id }}</p>
       </div>
     </div>
-    <div class="relative mt-6 grid grid-cols-2 gap-2">
+    <div class="relative mt-6">
       <div class="rounded-2xl bg-white/10 px-4 py-3">
         <p class="text-xs text-white/45">Баланс</p>
         <p class="mt-1 text-xl font-black">{{ user.coin_balance }} <span class="text-sm text-white/55">коинов</span></p>
-      </div>
-      <div class="rounded-2xl bg-white/10 px-4 py-3">
-        <p class="text-xs text-white/45">Ваша скидка</p>
-        <p class="mt-1 text-xl font-black">{{ user.personal_discount_percent }}%</p>
       </div>
     </div>
   </section>

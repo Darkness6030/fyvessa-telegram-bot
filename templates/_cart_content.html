@@ -53,9 +53,6 @@
     <label class="block text-sm"><span class="text-white/65">Скидка</span>
       <select class="mt-1 w-full rounded-xl bg-white px-4 py-3 text-ink" name="discount_mode">
         <option value="none">Без дополнительной скидки</option>
-        {% if user.personal_discount_percent %}
-        <option value="personal">Персональная — {{ user.personal_discount_percent }}%</option>
-        {% endif %}
         <option value="promo">Использовать промокод</option>
       </select>
     </label>

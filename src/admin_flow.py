@@ -35,7 +35,7 @@ from src.models import (
     SocialChannel,
     User,
 )
-from src.orders import cancel_order, confirm_payment, delete_completed_order, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
+from src.orders import cancel_order, confirm_payment, delete_order, DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, SHIPPING_STATUS_LABELS, update_shipping_status
 from src.payouts import current_partner_accruals, mark_payout_paid, next_payout_cutoff
 from src.referrals import (adjust_user_coins, approve_referral_reward, get_purchase_coin_percent, get_referral_activation_reward, reject_referral_reward, set_purchase_coin_percent, set_referral_activation_reward)
 from src.settings import SettingsValidationError, sync_settings
@@ -239,8 +239,12 @@ async def notify_payment_review(order: Order, user: User) -> bool:
                 '✖️ Отменить заказ',
                 OrderActionCallback(order_id=order.id, action='cancel'),
             ),
+            (
+                '🗑 Удалить заказ',
+                OrderActionCallback(order_id=order.id, action='delete_prompt'),
+            ),
             ('🏠 Меню', AdminSectionCallback(section='menu')),
-        ], 1, 1, 1),
+        ], 1, 1, 1, 1),
     )
 
 
@@ -727,11 +731,10 @@ def _order_keyboard(order: Order, user_id: int = 0, page: int = 0, total: int = 
             ),
         ))
 
-    if order.status == 'completed' and order.payment_status == 'paid':
-        buttons.append((
-            '🗑 Отменить оплату и удалить',
-            OrderActionCallback(order_id=order.id, action='delete_prompt'),
-        ))
+    buttons.append((
+        '🗑 Удалить заказ',
+        OrderActionCallback(order_id=order.id, action='delete_prompt'),
+    ))
 
     next_shipping_status = {
         'created': ('📦 Начать сборку', 'assembling'),
@@ -1668,9 +1671,11 @@ async def order_action(callback: CallbackQuery, callback_data: OrderActionCallba
 
     if callback_data.action == 'delete':
         try:
-            await delete_completed_order(order)
+            was_deleted = await delete_order(order)
         except ValueError as exc:
             return await callback.answer(str(exc), show_alert=True)
+        if not was_deleted:
+            return await callback.answer('Заказ уже удалён', show_alert=True)
 
         orders = await Order.get_recent()
         if orders:
