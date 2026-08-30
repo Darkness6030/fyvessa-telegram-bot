@@ -19,7 +19,11 @@ from rewire_sqlmodel import transaction
 
 from src.keyboards import inline_keyboard
 from src.models import SocialChannel, TelegramJoinRequest, User
-from src.referrals import award_referral_activation, initialize_referral_rewards
+from src.referrals import (
+    award_referral_activation,
+    claim_referral_reward,
+    initialize_referral_rewards,
+)
 from src.settings import get_settings
 
 
@@ -133,7 +137,7 @@ async def catalog(message: Message):
 @router.chat_join_request()
 @transaction(1)
 async def remember_chat_join_request(request: ChatJoinRequest):
-    """Remember pending requests, which getChatMember reports as `left`."""
+    """Remember and automatically reward a matching channel join request."""
     chat_ids = {
         str(request.chat.id),
         str(request.chat.shifted_id),
@@ -143,10 +147,16 @@ async def remember_chat_join_request(request: ChatJoinRequest):
         chat_ids.add(f'@{request.chat.username}'.lower())
 
     logger.info(f'chat_ids: {chat_ids}')
+    user = await User.get_by_id(request.from_user.id)
     for channel in await SocialChannel.get_active():
         configured_chat_id = (channel.telegram_chat_id or '').strip().lower()
         if configured_chat_id not in chat_ids:
             continue
+
+        if user:
+            # Create the pending reward before storing the join request; otherwise
+            # initialization would treat this brand-new request as preexisting.
+            await initialize_referral_rewards(user)
 
         existing = await TelegramJoinRequest.get_for_user_channel(
             request.from_user.id,
@@ -161,6 +171,9 @@ async def remember_chat_join_request(request: ChatJoinRequest):
                 social_channel_id=channel.id,
                 user_id=request.from_user.id,
             ).add()
+
+        if user:
+            await claim_referral_reward(user, channel)
 
 
 @plugin.setup()
