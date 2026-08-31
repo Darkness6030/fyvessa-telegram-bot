@@ -250,6 +250,15 @@ async def health() -> HealthResponse:
     return HealthResponse(status='ok')
 
 
+@router.get('/admin174grieudijf', response_class=HTMLResponse)
+async def admin_documentation(request: Request) -> HTMLResponse:
+    """Public, read-only operations manual; intentionally has no Telegram auth."""
+    return templates.TemplateResponse(
+        request=request,
+        name='admin_documentation.html',
+    )
+
+
 @router.get('/', response_class=HTMLResponse)
 @transaction(1)
 async def home(request: Request) -> HTMLResponse:
