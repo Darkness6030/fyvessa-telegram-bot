@@ -30,11 +30,20 @@ TECHNICAL_CHARACTERISTIC_LABELS = frozenset({
     'supplier',
 })
 
+IMAGE_FORMULA_PATTERN = re.compile(
+    r'^\s*=\s*IMAGE\s*\(\s*"((?:[^"]|"")+)"',
+    re.IGNORECASE,
+)
+
 
 def _image_reference(value: Any) -> Optional[str]:
     reference = str(value or '').strip()
     if not reference:
         return None
+
+    formula_match = IMAGE_FORMULA_PATTERN.match(reference)
+    if formula_match:
+        reference = formula_match.group(1).replace('""', '"').strip()
 
     if reference.startswith('/'):
         return reference
@@ -182,13 +191,11 @@ def _normalize_products(
 
         catalog_rows.append(catalog_row)
 
-        writable_data = sheet_data
-        if row_number in embedded_image_urls:
-            writable_data = {
-                field: value
-                for field, value in sheet_data.items()
-                if field != 'image_url'
-            }
+        writable_data = {
+            field: value
+            for field, value in sheet_data.items()
+            if field != 'image_url'
+        }
 
         updates.extend(row_updates(row_number, raw_data, writable_data, column_map))
 

@@ -225,7 +225,7 @@ def worksheet_values(
     ranges = [f"'{worksheet.title.replace(chr(39), chr(39) * 2)}'" for worksheet in worksheets]
     response = spreadsheet.values_batch_get(
         ranges,
-        params={'valueRenderOption': ValueRenderOption.unformatted.value},
+        params={'valueRenderOption': ValueRenderOption.formula.value},
     )
 
     value_ranges = response.get('valueRanges', [])
