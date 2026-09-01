@@ -1436,15 +1436,19 @@ async def admin_section(callback: CallbackQuery, callback_data: AdminSectionCall
         )
 
     elif callback_data.section == 'users':
-        users = await User.get_recent()
-        if not users:
+        total_users = await User.count()
+        if not total_users:
             return await callback.answer('Пользователей пока нет.', show_alert=True)
 
-        page = min(callback_data.page, len(users) - 1)
-        user = users[page]
+        page = min(max(callback_data.page, 0), total_users - 1)
+        users = await User.get_page(page)
+        if not users:
+            return await callback.answer('Пользователь не найден.', show_alert=True)
+
+        user = users[0]
         await _edit_message(
             callback, await _user_text(user),
-            _user_keyboard(user.id, page, len(users)),
+            _user_keyboard(user.id, page, total_users),
         )
 
     elif callback_data.section == 'promos':

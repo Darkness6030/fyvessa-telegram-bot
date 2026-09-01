@@ -162,6 +162,23 @@ class User(SQLModel, table=True):
         return list(await cls.select().order_by(cls.created_at.desc()).limit(limit).all())
 
     @classmethod
+    async def get_page(cls, page: int, page_size: int = 1) -> list[Self]:
+        """Return one page of users ordered from newest to oldest."""
+        return list(
+            await cls.select()
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .offset(max(page, 0) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+    @classmethod
+    async def count(cls) -> int:
+        return (await session_context.get().execute(
+            select(func.count(cls.id))
+        )).scalar_one()
+
+    @classmethod
     async def get_all(cls) -> list[Self]:
         return list(await cls.select().all())
 
