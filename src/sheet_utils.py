@@ -1,13 +1,13 @@
 import hashlib
 import re
 import unicodedata
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
 
 import gspread
-from gspread.exceptions import APIError
 from gspread.utils import ValidationConditionType, ValueInputOption, ValueRenderOption
 
 SPREADSHEET_TITLE = 'Fyvessa Admin'
@@ -265,6 +265,61 @@ def ensure_checkboxes(
     worksheets: list[tuple[gspread.Worksheet, dict[str, int]]],
     spec: SheetSpec,
 ) -> None:
+    worksheet_columns = {
+        worksheet.id: {
+            column_map[field] - 1
+            for field in spec.checkbox_fields
+        }
+        for worksheet, column_map in worksheets
+    }
+    metadata = spreadsheet.client.request(
+        'get',
+        f'https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}',
+        params={
+            'fields': (
+                'sheets(properties(sheetId),'
+                'tables(tableId,range,columnProperties))'
+            ),
+        },
+    ).json()
+    reset_requests = []
+    for sheet in metadata.get('sheets', []):
+        sheet_id = sheet['properties']['sheetId']
+        checkbox_columns = worksheet_columns.get(sheet_id)
+        if not checkbox_columns:
+            continue
+
+        for table in sheet.get('tables', []):
+            table_start = table.get('range', {}).get('startColumnIndex', 0)
+            column_properties = deepcopy(table.get('columnProperties', []))
+            changed = False
+            for position, column in enumerate(column_properties):
+                relative_index = column.get('columnIndex', position)
+                if table_start + relative_index not in checkbox_columns:
+                    continue
+                if (
+                    column.get('columnType')
+                    not in (None, 'COLUMN_TYPE_UNSPECIFIED')
+                    or 'dataValidationRule' in column
+                ):
+                    changed = True
+                column['columnType'] = 'COLUMN_TYPE_UNSPECIFIED'
+                column.pop('dataValidationRule', None)
+
+            if changed:
+                reset_requests.append({
+                    'updateTable': {
+                        'table': {
+                            'tableId': table['tableId'],
+                            'columnProperties': column_properties,
+                        },
+                        'fields': 'columnProperties',
+                    },
+                })
+
+    if reset_requests:
+        spreadsheet.batch_update({'requests': reset_requests})
+
     for worksheet, column_map in worksheets:
         requests = []
         for field in spec.checkbox_fields:
@@ -284,13 +339,7 @@ def ensure_checkboxes(
                     },
                 },
             })
-        try:
-            spreadsheet.batch_update({'requests': requests})
-        except APIError as exc:
-            # Google Sheets tables already render typed boolean columns as
-            # checkboxes and reject an additional validation rule.
-            if 'not allowed on cells in typed columns' not in str(exc):
-                raise
+        spreadsheet.batch_update({'requests': requests})
 
 
 def as_decimal(value: Any) -> Optional[Decimal]:

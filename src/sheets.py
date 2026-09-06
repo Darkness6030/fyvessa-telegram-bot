@@ -141,12 +141,20 @@ def _normalize_products(
 
     seen_skus = seen_skus if seen_skus is not None else set()
     for row_number, values_row in enumerate(values[1:], start=2):
-        if not has_values(values_row):
+        if not has_values(values_row) and row_number not in embedded_image_urls:
             continue
 
         raw_data = extract_row(values_row, column_map)
         product_name = str(raw_data['name'] or '').strip()
-        if not product_name and not str(raw_data['sku'] or '').strip():
+        image_reference = (
+            embedded_image_urls.get(row_number)
+            or _image_reference(raw_data['image_url'])
+        )
+        if (
+            not product_name
+            and not str(raw_data['sku'] or '').strip()
+            and not image_reference
+        ):
             continue
 
         product_sku = normalize_sku(raw_data['sku'], product_name, category.name)
@@ -159,8 +167,19 @@ def _normalize_products(
             sku_suffix += 1
 
         seen_skus.add(product_sku.casefold())
+        if not product_name:
+            placeholder_data = {
+                'sku': product_sku,
+                'is_active': False,
+                'is_popular': False,
+                'is_new': False,
+            }
+            updates.extend(
+                row_updates(row_number, raw_data, placeholder_data, column_map),
+            )
+            continue
+
         is_unsafe = not product_name
-        product_name = product_name or f'Товар {product_sku}'
         prices, prices_unsafe = _normalize_prices(raw_data)
         is_unsafe |= prices_unsafe
 
@@ -173,11 +192,8 @@ def _normalize_products(
             'description': str(raw_data['description'] or '').strip(),
             'characteristics': _clean_characteristics(raw_data['characteristics']),
             **prices,
-            'image_url': (
-                embedded_image_urls.get(row_number)
-                or _image_reference(raw_data['image_url'])
-            ),
-            'is_active': False if is_unsafe else as_bool(raw_data['is_active'], True),
+            'image_url': image_reference,
+            'is_active': False if is_unsafe else as_bool(raw_data['is_active'], False),
             'is_popular': as_bool(raw_data['is_popular'], False),
             'is_new': as_bool(raw_data['is_new'], False),
             'owner': owner.name,
@@ -199,9 +215,6 @@ def _normalize_products(
 
         updates.extend(row_updates(row_number, raw_data, writable_data, column_map))
 
-    if not catalog_rows:
-        raise CatalogValidationError('The products worksheet contains no products')
-
     return Normalized(catalog_rows, updates)
 
 
@@ -211,6 +224,23 @@ def _product_worksheets(spreadsheet: gspread.Spreadsheet) -> list[gspread.Worksh
         for worksheet in spreadsheet.worksheets()
         if worksheet.title.casefold() not in RESERVED_SHEET_TITLES
     ]
+
+
+def _has_product_records(values: list[list[Any]]) -> bool:
+    column_map, _ = resolve_columns(values, PRODUCTS)
+    for values_row in values[1:]:
+        if not has_values(values_row):
+            continue
+
+        raw_data = extract_row(values_row, column_map)
+        if (
+            str(raw_data['name'] or '').strip()
+            or str(raw_data['sku'] or '').strip()
+            or _image_reference(raw_data['image_url'])
+        ):
+            return True
+
+    return False
 
 
 def _load_catalog() -> CatalogSource:
@@ -233,7 +263,7 @@ def _load_catalog() -> CatalogSource:
         product_worksheets = [
             worksheet
             for worksheet in product_candidates
-            if has_records(all_values[worksheet.title])
+            if _has_product_records(all_values[worksheet.title])
         ]
         if not product_worksheets:
             raise CatalogValidationError(
@@ -255,7 +285,7 @@ def _load_catalog() -> CatalogSource:
             worksheet.id: CategoryRow(name=worksheet.title)
             for worksheet in product_worksheets
         }
-        categories = list(categories_by_sheet_id.values())
+        categories = []
         owners = _normalize_owners(owners_values)
 
         image_urls = cache_spreadsheet_images(
@@ -278,8 +308,15 @@ def _load_catalog() -> CatalogSource:
                 seen_skus,
             )
             product_rows.extend(normalized.rows)
+            if normalized.rows:
+                categories.append(categories_by_sheet_id[worksheet.id])
             product_updates[worksheet.title] = normalized.updates
             corrected_product_rows += normalized.corrected_rows
+
+        if not product_rows:
+            raise CatalogValidationError(
+                'Google spreadsheet contains no products',
+            )
 
         write_updates(owners_worksheet, owners.updates)
         checkbox_worksheets = []
