@@ -295,7 +295,13 @@ def ensure_checkboxes(
             changed = False
             for position, column in enumerate(column_properties):
                 relative_index = column.get('columnIndex', position)
-                if table_start + relative_index not in checkbox_columns:
+                sheet_column = table_start + relative_index
+                is_checkbox = sheet_column in checkbox_columns
+                is_dropdown = (
+                    column.get('columnType') == 'DROPDOWN'
+                    or 'dataValidationRule' in column
+                )
+                if not is_checkbox and not is_dropdown:
                     continue
                 if (
                     column.get('columnType')
@@ -321,7 +327,17 @@ def ensure_checkboxes(
         spreadsheet.batch_update({'requests': reset_requests})
 
     for worksheet, column_map in worksheets:
-        requests = []
+        requests = [{
+            'setDataValidation': {
+                'range': {
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 0,
+                    'endRowIndex': worksheet.row_count,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': max(column_map.values()),
+                },
+            },
+        }]
         for field in spec.checkbox_fields:
             column_index = column_map[field] - 1
             requests.append({

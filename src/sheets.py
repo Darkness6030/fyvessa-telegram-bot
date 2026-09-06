@@ -97,11 +97,12 @@ def _normalize_prices(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     retail = as_money(raw['retail_price'])
     wholesale = as_money(raw['wholesale_price'])
     discount = as_money(raw['discount_price'])
+    wholesale_missing = wholesale is None
 
     is_unsafe = False
-    if wholesale is None or wholesale < 0:
+    if wholesale is not None and wholesale < 0:
         wholesale, is_unsafe = Decimal('0'), True
-    elif wholesale > MAX_MONEY:
+    elif wholesale is not None and wholesale > MAX_MONEY:
         wholesale, is_unsafe = MAX_MONEY, True
 
     if retail is None or retail <= 0:
@@ -109,6 +110,9 @@ def _normalize_prices(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         retail, is_unsafe = max(candidates, default=Decimal('1')), True
     elif retail > MAX_MONEY:
         retail, is_unsafe = MAX_MONEY, True
+
+    if wholesale_missing:
+        wholesale = as_money(retail * Decimal('0.7'))
 
     if discount is not None and (discount <= 0 or discount >= retail):
         discount = None
